@@ -41,14 +41,14 @@ a{color:var(--blue)}
 .hidden{display:none !important}
 
 /* top bar */
-#top{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:8px 14px;background:linear-gradient(90deg,rgba(255,30,60,.14),rgba(5,14,30,.85) 35%,rgba(5,14,30,.85) 65%,rgba(110,231,255,.08));backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,30,60,.6);box-shadow:0 1px 0 rgba(255,30,60,.25),0 8px 30px rgba(0,0,0,.5),0 0 24px rgba(255,30,60,.15);flex-shrink:0;position:relative}
+#top{display:flex;flex-wrap:wrap;align-items:center;gap:10px;padding:calc(8px + env(safe-area-inset-top,0px)) 14px 8px;background:linear-gradient(90deg,rgba(255,30,60,.14),rgba(5,14,30,.85) 35%,rgba(5,14,30,.85) 65%,rgba(110,231,255,.08));backdrop-filter:blur(10px);border-bottom:1px solid rgba(255,30,60,.6);box-shadow:0 1px 0 rgba(255,30,60,.25),0 8px 30px rgba(0,0,0,.5),0 0 24px rgba(255,30,60,.15);flex-shrink:0;position:relative}
 #top:after{content:'';position:absolute;left:0;bottom:-1px;height:1px;width:40%;background:linear-gradient(90deg,var(--accent),transparent);box-shadow:0 0 10px var(--accent)}
 #top .brand{font-family:var(--condensed);font-weight:700;font-size:22px;letter-spacing:1px;color:#fff;display:flex;align-items:baseline;gap:6px}
 #top .brand .nd{color:#fff;padding:1px 8px;font-size:18px;border:1px solid var(--accent);background:linear-gradient(180deg,rgba(255,30,60,.55),rgba(255,30,60,.2));clip-path:polygon(0 0,100% 0,100% 70%,88% 100%,0 100%);text-shadow:0 0 10px rgba(255,30,60,.9);box-shadow:0 0 14px rgba(255,30,60,.45)}
 #top .brand .sub{color:var(--ice);font-size:12px;letter-spacing:3px;font-family:var(--mono);font-weight:500;text-shadow:0 0 8px rgba(110,231,255,.5)}
 .sel{height:40px;padding:0 10px;border-radius:4px;border:1px solid var(--line2);background:rgba(10,28,52,.8);color:#fff;font-size:15px;font-weight:600;max-width:200px;box-shadow:inset 0 0 0 1px rgba(110,231,255,.06)}
 .nav{display:flex;gap:6px;margin-left:auto}
-.score{flex-basis:100%}
+.score{flex-basis:100%;flex-wrap:wrap;row-gap:4px}
 .nav button{height:40px;padding:0 16px;border-radius:3px;border:1px solid var(--line2);background:rgba(10,28,52,.6);color:var(--muted);font-family:var(--condensed);font-weight:700;font-size:16px;letter-spacing:2px;text-transform:uppercase;clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
 .nav button.on{background:linear-gradient(180deg,rgba(255,30,60,.85),rgba(170,10,40,.9));color:#fff;border-color:#ff7a8c;box-shadow:0 0 18px rgba(255,30,60,.6),inset 0 0 12px rgba(255,255,255,.15);text-shadow:0 0 8px rgba(255,255,255,.6)}
 .score{display:flex;align-items:center;gap:12px;padding:5px 14px;background:linear-gradient(90deg,rgba(255,30,60,.08),rgba(3,10,22,.9) 20%,rgba(3,10,22,.9) 80%,rgba(110,231,255,.08));border:1px solid var(--line2);border-radius:4px;box-shadow:inset 0 0 20px rgba(0,0,0,.6),0 0 0 1px rgba(110,231,255,.05);clip-path:polygon(10px 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%,0 10px)}
@@ -171,7 +171,7 @@ a{color:var(--blue)}
 #chart .field{height:40px}
 #chart .field .cap{display:none}
 #chart .sit5{gap:8px}
-#chart .two{flex:0 0 auto;gap:6px}
+#chart .two{flex:1 0 auto;gap:6px;align-items:stretch}
 #chart .two .panel{min-height:0;overflow:visible}
 #chart .btn.save{height:42px;font-size:18px;padding:0 20px}
 #chart .btn.act{height:42px;font-size:14px}
@@ -201,14 +201,14 @@ a{color:var(--blue)}
 }
 /* chart layout */
 #chart .sit5{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;align-items:end}
-#chart .two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:start}
+#chart .two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;align-items:stretch}
 #chart .align{display:grid;grid-template-columns:3fr 2fr;gap:12px;align-items:start}
 .panel.actions{flex-direction:row;align-items:center;gap:10px;flex-wrap:wrap}
 .btn.save{height:54px;padding:0 30px;border-radius:4px;background:linear-gradient(180deg,rgba(255,30,60,.95),rgba(150,6,34,.98));border-color:#ff8a9a;color:#fff;font-size:22px;letter-spacing:3px;box-shadow:0 0 26px rgba(255,30,60,.6),inset 0 0 16px rgba(255,255,255,.18);text-shadow:0 0 10px rgba(255,255,255,.7);clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px);animation:breathe 2.4s ease-in-out infinite}
 @keyframes breathe{0%,100%{box-shadow:0 0 18px rgba(255,30,60,.45),inset 0 0 16px rgba(255,255,255,.15)}50%{box-shadow:0 0 34px rgba(255,30,60,.8),inset 0 0 16px rgba(255,255,255,.22)}}
 .btn.save.edit{background:linear-gradient(180deg,rgba(42,168,216,.95),rgba(20,90,130,.98));border-color:#8fe6ff;box-shadow:0 0 26px rgba(110,231,255,.6);animation:none}
 .btn.act{height:52px;border-radius:8px;font-size:16px}
-.last{flex:1;min-width:200px;display:flex;align-items:center;gap:8px;font-size:13px;min-width:0}
+.last{flex:1;min-width:120px;display:flex;align-items:center;gap:8px;font-size:13px;white-space:nowrap;overflow:hidden}
 .last .n{font-family:var(--condensed);font-size:16px;font-weight:700;color:var(--accent)}
 .last .t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#c4ccd6}
 .sm{height:34px;padding:0 12px;border-radius:4px;border:1px solid var(--line2);background:var(--bg);color:var(--text);font-size:12px;font-weight:600}
@@ -515,18 +515,32 @@ function driveStats(g){
   const runs=ps.filter(p=>p.d&&p.d.rp==='RUN').length;
   return {n:ps.length,yds,firsts,runs,pass:ps.length-runs};
 }
+let fitKey=null, fitZoom=1;
 function fitChart(){
   const el=document.getElementById('chart'); if(!el||!el.classList.contains('on')) return;
-  el.style.zoom='1';
-  requestAnimationFrame(()=>{
-    const avail=el.clientHeight, need=el.scrollHeight; if(!avail||!need) return;
-    if(need>avail+1){ const z=Math.max(0.72, (avail/need)*0.995); el.style.zoom=String(z); }
-  });
+  const main=document.getElementById('main'); const o=opp(); if(!o) return;
+  const key=[innerWidth,innerHeight,o.id,...CATS.map(([c])=>o[c].length),(o.roster||[]).length,oppConcepts(o).RUN.length,oppConcepts(o).PASS.length].join('|');
+  if(key===fitKey){ el.style.zoom=String(fitZoom); return; }
+  // worst case: RPO with a fumble result (longest result list + fumble toggle), a concept picked, editing banner off
+  const saved=cur; cur=Object.assign(blankEntry(),{hash:'L',down:1,dist:10,side:'OWN',yl:25,type:'RPO',result:'COMPLETE FUMBLE',concept:'x'});
+  let html; try{ html=chartHTML(); } finally { cur=saved; }
+  const probe=document.createElement('section'); probe.id='chart'; probe.className='view on';
+  probe.style.cssText='position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;height:auto;overflow:visible;flex:none;width:'+el.clientWidth+'px';
+  const host=document.getElementById('main'); el.id='chart_live'; host.appendChild(probe); probe.innerHTML=html;
+  const need=probe.scrollHeight; host.removeChild(probe); el.id='chart';
+  const avail=main.clientHeight; let z=1;
+  if(need&&avail){ z=Math.max(0.72, Math.min(1.2, (avail/need)*0.985)); }
+  // zoom narrows the layout width; check the probe again at that zoom so wrapping is accounted for
+  if(z!==1){ const p2=document.createElement('section'); p2.id='chart'; p2.className='view on'; p2.style.cssText='position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;height:auto;overflow:visible;flex:none;width:'+(el.clientWidth/z)+'px;zoom:'+z; el.id='chart_live'; host.appendChild(p2); p2.innerHTML=html; const need2=p2.scrollHeight*z; host.removeChild(p2); el.id='chart'; if(need2>avail) z=Math.max(0.72, z*(avail/need2)*0.985); }
+  fitKey=key; fitZoom=z; el.style.zoom=String(z);
 }
-window.addEventListener('resize',fitChart);
+window.addEventListener('resize',()=>{ fitKey=null; fitChart(); });
 function renderChart(){
+  const el=document.getElementById('chart'); el.innerHTML=chartHTML(); fitChart();
+}
+function chartHTML(){
   const g=game(), o=opp();
-  if(!g||!o){ document.getElementById('chart').innerHTML=`<div class="panel"><b>No opponent/game.</b> Go to Opponents to create one.</div>`; return; }
+  if(!g||!o){ return `<div class="panel"><b>No opponent/game.</b> Go to Opponents to create one.</div>`; }
   const tg=toGoal(cur.side,cur.yl);
   const nx=computeNext(cur);
   const results = cur.type? RESULTS[cur.type] : [];
@@ -537,7 +551,7 @@ function renderChart(){
   const ydsCls = (+cur.yds>0)?'pos':(+cur.yds<0)?'neg':'';
   const ds=driveStats(g); const passes=plays.length-runs; const rp=plays.length?Math.round(100*runs/plays.length):50;
   const explosives=plays.filter(p=>(p.d&&p.d.rp==='RUN'?+p.yds>=12:+p.yds>=16)).length;
-  document.getElementById('chart').innerHTML = `
+  return `
   ${editId?`<div class="panel" style="border-color:var(--ice);padding:6px 14px;box-shadow:0 0 18px rgba(110,231,255,.3)"><div class="ph"><b style="color:var(--blue)">EDITING PLAY #${cur.n}</b><button class="sm" data-act="cancelEdit">Cancel edit</button></div></div>`:''}
   <div class="panel">
     ${fieldStrip(tg,cur.dist,cur.side,cur.yl)}
@@ -608,7 +622,6 @@ function renderChart(){
     <div class="vsep"></div>
     <div class="stat"><small>${plays.length} PLAYS · </small><span style="color:#ff6f84;text-shadow:0 0 8px rgba(255,30,60,.8)">${pct(runs,plays.length)} RUN</span><small> · </small><span style="color:var(--ice);text-shadow:0 0 8px rgba(110,231,255,.8)">${pct(passes,plays.length)} PASS</span><small> · </small>${avg(ydsAll)}<small> YPP</small></div>
   </div>`;
-  fitChart();
 }
 function conceptList(){ const s=new Set(); S.plays.forEach(p=>p.concept&&s.add(p.concept.trim())); return [...s].sort(); }
 /* Concepts live per opponent in two buckets, RUN and PASS. SCREEN uses PASS; RPO shows RUN then PASS. */
