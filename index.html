@@ -74,6 +74,8 @@ a{color:var(--blue)}
 .wheel.snipw{width:58px;height:32px} .wheel.snipw .wi{height:32px;line-height:32px;font-size:17px;color:var(--amber);text-shadow:0 0 8px rgba(255,210,60,.5)}
 #chart .wheel.snipw,#chart .wheel.snipw .wi{height:32px;line-height:32px}
 .snipin{width:54px;height:32px;text-align:center;border-radius:4px;border:1px solid var(--line2);background:linear-gradient(180deg,#02070f,#071527);color:var(--amber);font-family:var(--mono);font-size:15px;font-weight:700;padding:0;text-shadow:0 0 8px rgba(255,210,60,.5)}
+.sync{font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:3px 8px;border-radius:3px;border:1px solid var(--line2);color:var(--muted)}
+.sync.ok{border-color:rgba(93,255,168,.6);color:var(--green2)} .sync.view{border-color:rgba(110,231,255,.6);color:var(--ice)} .sync.bad{border-color:rgba(255,210,60,.7);color:var(--amber)}
 .final{font-family:var(--condensed);font-weight:700;letter-spacing:3px;color:#ff8a9a;border:1px solid var(--accent);padding:1px 8px;border-radius:3px;box-shadow:0 0 12px rgba(255,30,60,.5)}
 .clock button.on{background:rgba(255,30,60,.25);color:#fff;border-color:var(--accent);box-shadow:0 0 12px rgba(255,30,60,.6),inset 0 0 8px rgba(255,30,60,.4)}
 .clock span{font-family:var(--mono);color:var(--ice);text-shadow:0 0 8px rgba(110,231,255,.6)}
@@ -419,10 +421,45 @@ function load(){
     return s; } }catch(e){}
   return defaultState();
 }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Storage full or blocked — export a backup!'); } }
+/* ============================================================ LIVE SYNC (Firebase Realtime Database, REST — no SDK)
+   Charting device: every save() pushes the whole state to  <dbUrl>/tc/<room>/state.json  (debounced).
+   Viewer device:   opens an SSE stream on the same path and re-renders Reports as plays land. Charting is locked. */
+const SYNC_KEY='tendency_sync_v1';
+let SYNC = (()=>{ try{ return Object.assign({url:'',room:'',mode:'off',secret:''}, JSON.parse(localStorage.getItem(SYNC_KEY)||'{}')); }catch(e){ return {url:'',room:'',mode:'off',secret:''}; } })();
+function saveSync(){ localStorage.setItem(SYNC_KEY, JSON.stringify(SYNC)); }
+function syncPath(){ if(!SYNC.url||!SYNC.room) return null; const base=SYNC.url.replace(/\/+$/,''); const room=SYNC.room.trim().replace(/[^a-z0-9_-]/gi,'').toLowerCase(); return `${base}/tc/${encodeURIComponent(room)}/state.json${SYNC.secret?'?auth='+encodeURIComponent(SYNC.secret):''}`; }
+let syncTimer=null, syncState={last:0,err:'',pending:false,busy:false};
+function pushSync(){ if(SYNC.mode!=='chart') return; const u=syncPath(); if(!u) return; syncState.pending=true; clearTimeout(syncTimer); syncTimer=setTimeout(doPush,800); }
+async function doPush(){ const u=syncPath(); if(!u||syncState.busy) return; syncState.busy=true;
+  try{ const body=JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays,ts:Date.now()});
+    const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body}); if(!r.ok) throw new Error('HTTP '+r.status);
+    syncState.last=Date.now(); syncState.err=''; syncState.pending=false; }
+  catch(e){ syncState.err=String(e.message||e); setTimeout(doPush,5000); }
+  finally{ syncState.busy=false; renderSyncBadge(); } }
+let es=null, pollTimer=null;
+function applyRemote(remote){ if(!remote||!remote.plays) return; const ui=S.ui; S={lib:remote.lib,opponents:remote.opponents,games:remote.games,plays:remote.plays,ui}; 
+  if(!S.opponents.find(o=>o.id===S.ui.oppId)){ S.ui.oppId=S.opponents[0]&&S.opponents[0].id; }
+  if(!S.games.find(g=>g.id===S.ui.gameId)){ const gs=S.games.filter(g=>g.oppId===S.ui.oppId); S.ui.gameId=gs.length?gs[gs.length-1].id:null; }
+  S.plays.forEach(p=>{ try{ p.d=derive(p); }catch(e){} });
+  syncState.last=remote.ts||Date.now(); syncState.err=''; try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){}
+  if(view==='reports'||view==='log') render(); else renderTop(); renderSyncBadge(); }
+function startViewer(){ stopViewer(); const u=syncPath(); if(!u) return;
+  const first=async()=>{ try{ const r=await fetch(u,{cache:'no-store'}); if(r.ok) applyRemote(await r.json()); }catch(e){ syncState.err=String(e.message||e); renderSyncBadge(); } };
+  first();
+  try{ es=new EventSource(u); es.addEventListener('put',e=>{ try{ const d=JSON.parse(e.data); if(d.path==='/') applyRemote(d.data); else first(); }catch(x){} }); es.addEventListener('patch',()=>first()); es.onerror=()=>{ syncState.err='stream dropped — retrying'; renderSyncBadge(); }; }catch(e){}
+  pollTimer=setInterval(first,15000); // belt and braces
+}
+function stopViewer(){ if(es){ es.close(); es=null; } if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
+function ago(t){ if(!t) return '—'; const s=Math.max(0,Math.round((Date.now()-t)/1000)); return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s'; }
+function renderSyncBadge(){ const el=document.getElementById('syncBadge'); if(!el) return;
+  if(SYNC.mode==='off'||!syncPath()){ el.className='hidden'; return; }
+  el.className='sync '+(syncState.err?'bad':(SYNC.mode==='view'?'view':'ok'));
+  el.innerHTML = SYNC.mode==='view' ? `VIEWER · updated ${ago(syncState.last)} ago${syncState.err?' · '+esc(syncState.err):''}` : `LIVE${syncState.pending?' · sending…':' · synced '+ago(syncState.last)+' ago'}${syncState.err?' · '+esc(syncState.err):''}`; }
+setInterval(renderSyncBadge,1000);
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Storage full or blocked — export a backup!'); } pushSync(); }
 
 let S = load();
-let view = 'chart';
+let view = (JSON.parse(localStorage.getItem('tendency_sync_v1')||'{}').mode==='view') ? 'reports' : 'chart';
 let editId = null;      // play id being edited
 let stash = null;       // live entry stashed while editing
 let penOpen = false;
@@ -531,11 +568,11 @@ function render(){ renderTop(); document.querySelectorAll('.view').forEach(v=>v.
 }
 
 function renderTop(){
-  const g=game(), o=opp();
+  const g=game(), o=opp(); setTimeout(renderSyncBadge,0);
   const half = g && g.qtr>=3 ? 1:0;
   const tos=(team)=>{ const t=g.to[team]; let h=''; for(let hh=0;hh<2;hh++){ for(let i=0;i<3;i++) h+=`<i class="${i<t[hh]?'on':''}"></i>`; if(hh===0) h+='<i class="gap"></i>'; } return h; };
   document.getElementById('top').innerHTML = `
-    <div class="brand"><span class="nd">ND</span> PIOS DEFENSE <span class="sub">TENDENCY CHART</span></div>
+    <div class="brand"><span class="nd">ND</span> PIOS DEFENSE <span class="sub">TENDENCY CHART</span></div><span id="syncBadge" class="hidden" style="margin-left:6px"></span>
     <select class="sel" data-act="pickOpp" aria-label="Opponent">${S.opponents.map(x=>`<option value="${x.id}" ${x.id===S.ui.oppId?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
     <select class="sel" data-act="pickGame" aria-label="Game">${S.games.filter(x=>x.oppId===S.ui.oppId).map(x=>`<option value="${x.id}" ${x.id===S.ui.gameId?'selected':''}>${esc(x.label)} · ${x.date}${x.ended?' · FINAL':''}</option>`).join('')}<option value="__new">+ New game…</option></select>
     <nav class="nav">${[['chart','Chart'],['log','Play Log'],['reports','Reports'],['opponents','Opponents'],['export','Export']].map(([k,l])=>`<button class="${view===k?'on':''}" data-act="view" data-v="${k}">${l}</button>`).join('')}</nav>
@@ -827,6 +864,11 @@ document.addEventListener('click', async e=>{
     case 'conceptDel': { const o=opp(); const c=oppConcepts(o); c[b.dataset.b]=c[b.dataset.b].filter(x=>x!==b.dataset.v); save(); render(); break; }
     case 'conceptAddList': { const inp=document.getElementById('cn_'+b.dataset.b); const v=(inp.value||'').trim(); if(!v) return; addConcept(opp(), b.dataset.b, v); save(); render(); break; }
     case 'conceptsRebuild': { rebuildConcepts(opp()); save(); render(); toast('Concept lists rebuilt from logged plays'); break; }
+    case 'syncMode': { SYNC.url=(document.getElementById('syncUrl').value||'').trim(); SYNC.room=(document.getElementById('syncRoom').value||'').trim(); SYNC.secret=(document.getElementById('syncSecret').value||'').trim(); SYNC.mode=b.dataset.v; saveSync(); stopViewer();
+      if(SYNC.mode==='view') startViewer(); else if(SYNC.mode==='chart'){ pushSync(); } toast('Sync: '+SYNC.mode.toUpperCase()); render(); break; }
+    case 'syncTest': { SYNC.url=(document.getElementById('syncUrl').value||'').trim(); SYNC.room=(document.getElementById('syncRoom').value||'').trim(); SYNC.secret=(document.getElementById('syncSecret').value||'').trim(); saveSync(); const u=syncPath(); if(!u){ toast('Enter the database URL and a room code first'); break; }
+      try{ const r=await fetch(u,{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status+(r.status===401?' — rules require auth (add the secret) or set test-mode rules':'')); const d=await r.json(); toast(d&&d.plays?`Connected · room has ${d.plays.length} plays (updated ${ago(d.ts)} ago)`:'Connected · room is empty — set the charting iPad to CHARTING'); }
+      catch(e){ toast('Cannot reach database: '+(e.message||e)); } break; }
     case 'endGame': if(await askConfirm(`End ${g.label}? Final: ${opp().name} ${g.score.opp} – ${opp().us||'US'} ${g.score.us}. Charting locks until reopened.`,'END GAME')){ g.ended=true; g.endedAt=Date.now(); cur=blankEntry(); storeSit(); save(); toast('Game ended — export a backup'); render(); } break;
     case 'reopenGame': g.ended=false; save(); render(); break;
     case 'pat2Cancel': startNewDrive('KICKOFF',true); break;
@@ -872,6 +914,7 @@ function slug(s){ return String(s).toLowerCase().replace(/[^a-z0-9]+/g,'_').repl
 
 function savePlay(){
   const g=game(), o=opp();
+  if(SYNC.mode==='view'){ toast('Viewer mode — this device only reads. Chart on the main iPad.'); return; }
   if(g.ended){ toast('Game is ended — tap Reopen in the score bar to chart'); return; }
   if(!cur.hash){ toast('Pick a hash (Left / Middle / Right)'); document.querySelectorAll('[data-f=hash]').forEach(b=>b.classList.add('need')); return; }
   if(!cur.type){ toast('Pick a play type'); return; }
@@ -1621,6 +1664,21 @@ function renderExport(){
       <div class="note">Data lives only in this browser on this device. Back up after every game. To move to another device, import the backup there — opponents, games and plays are merged by ID so nothing duplicates.</div>
     </div>
   </div>
+  <div class="panel">
+    <div class="ph"><b>LIVE SYNC</b><small>chart on one iPad · view updating reports on any other device</small></div>
+    <div class="form-row">
+      <div class="grp"><span class="lbl">Firebase database URL</span><input class="txt" id="syncUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" value="${esc(SYNC.url)}"></div>
+      <div class="grp"><span class="lbl">Room code <span>(same on every device)</span></span><input class="txt" id="syncRoom" placeholder="e.g. ndpios" value="${esc(SYNC.room)}"></div>
+    </div>
+    <div class="grp"><span class="lbl">Database secret <span>(optional — only if your rules require auth)</span></span><input class="txt" id="syncSecret" type="password" value="${esc(SYNC.secret)}"></div>
+    <div class="row" style="align-items:center;gap:8px;margin-top:4px"><span class="lbl">This device is</span>
+      <button class="btn ${SYNC.mode==='off'?'on':''}" data-act="syncMode" data-v="off">OFF</button>
+      <button class="btn ${SYNC.mode==='chart'?'on':''}" data-act="syncMode" data-v="chart">CHARTING (sends)</button>
+      <button class="btn ${SYNC.mode==='view'?'on':''}" data-act="syncMode" data-v="view">VIEWER (reads only)</button>
+      <button class="btn ok on" data-act="syncTest">TEST CONNECTION</button>
+    </div>
+    <div class="note" id="syncNote">${SYNC.mode==='chart'?'Every saved play is pushed to the cloud within a second. Works offline — it catches up when the connection returns.':SYNC.mode==='view'?'This device mirrors the charting iPad. Reports and the Play Log refresh as plays come in. Charting is locked here.':'Setup: Firebase console → create project → Realtime Database → start in test mode → copy the database URL above. Pick a room code, set the charting iPad to CHARTING and every other device to VIEWER.'}</div>
+  </div>
   <div class="panel"><div class="ph"><b>REPORTS AS PDF</b></div><div class="note">Open Reports, pick the scope, tap SAVE PDF — the app builds the PDF itself (landscape, every table). Same button on the Play Log. Print uses the browser's own print dialog where it's allowed.</div></div>`;
 }
 const CSV_COLS=['play','snip','game','date','opponent','qtr','series','down','distance','dd_label','dd_bucket','hash','side','yard_line','to_goal','zone','personnel','backfield','backfield_sw','backfield_type','backfield_dc_term','strength','form','formation','motion','play_type','run_pass','direction','strong_weak','field_boundary','back_to','to_back','concept','players','result','scramble_type','scramble_dir','scramble_fb','scramble_sw','scramble_vs_play','fumble_recovered','yards','success','pat','pat_good','ts'];
@@ -1978,6 +2036,7 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigat
 window.addEventListener('beforeunload',()=>save());
 loadSit();
 render();
+if(SYNC.mode==='view') startViewer(); else if(SYNC.mode==='chart') pushSync();
 </script>
 </body>
 </html>
