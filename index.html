@@ -74,6 +74,8 @@ a{color:var(--blue)}
 .wheel.snipw{width:58px;height:32px} .wheel.snipw .wi{height:32px;line-height:32px;font-size:17px;color:var(--amber);text-shadow:0 0 8px rgba(255,210,60,.5)}
 #chart .wheel.snipw,#chart .wheel.snipw .wi{height:32px;line-height:32px}
 .snipin{width:54px;height:32px;text-align:center;border-radius:4px;border:1px solid var(--line2);background:linear-gradient(180deg,#02070f,#071527);color:var(--amber);font-family:var(--mono);font-size:15px;font-weight:700;padding:0;text-shadow:0 0 8px rgba(255,210,60,.5)}
+.viewbar{flex-basis:100%;text-align:center;font-family:var(--condensed);font-weight:700;letter-spacing:3px;font-size:13px;color:var(--ice);background:rgba(110,231,255,.08);border:1px solid rgba(110,231,255,.35);border-radius:3px;padding:2px 0;margin:-2px 0 2px}
+.ro .mini,.ro .to-btn,.ro .endgame,.ro [data-act=qtr]{pointer-events:none;opacity:.35}
 .sync{font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:3px 8px;border-radius:3px;border:1px solid var(--line2);color:var(--muted)}
 .sync.ok{border-color:rgba(93,255,168,.6);color:var(--green2)} .sync.view{border-color:rgba(110,231,255,.6);color:var(--ice)} .sync.bad{border-color:rgba(255,210,60,.7);color:var(--amber)}
 .final{font-family:var(--condensed);font-weight:700;letter-spacing:3px;color:#ff8a9a;border:1px solid var(--accent);padding:1px 8px;border-radius:3px;box-shadow:0 0 12px rgba(255,30,60,.5)}
@@ -425,19 +427,22 @@ function load(){
    Charting device: every save() pushes the whole state to  <dbUrl>/tc/<room>/state.json  (debounced).
    Viewer device:   opens an SSE stream on the same path and re-renders Reports as plays land. Charting is locked. */
 const SYNC_KEY='tendency_sync_v1';
-let SYNC = (()=>{ try{ return Object.assign({url:'',room:'',mode:'off',secret:''}, JSON.parse(localStorage.getItem(SYNC_KEY)||'{}')); }catch(e){ return {url:'',room:'',mode:'off',secret:''}; } })();
+const SYNC_DEFAULTS={url:'https://tendency-reports-default-rtdb.firebaseio.com',room:'ndpios',mode:'off',secret:''};
+let SYNC = (()=>{ try{ const saved=JSON.parse(localStorage.getItem(SYNC_KEY)||'{}'); const o=Object.assign({},SYNC_DEFAULTS,saved); if(!o.url) o.url=SYNC_DEFAULTS.url; if(!o.room) o.room=SYNC_DEFAULTS.room; return o; }catch(e){ return Object.assign({},SYNC_DEFAULTS); } })();
 function saveSync(){ localStorage.setItem(SYNC_KEY, JSON.stringify(SYNC)); }
 function syncPath(){ if(!SYNC.url||!SYNC.room) return null; const base=SYNC.url.replace(/\/+$/,''); const room=SYNC.room.trim().replace(/[^a-z0-9_-]/gi,'').toLowerCase(); return `${base}/tc/${encodeURIComponent(room)}/state.json${SYNC.secret?'?auth='+encodeURIComponent(SYNC.secret):''}`; }
 let syncTimer=null, syncState={last:0,err:'',pending:false,busy:false};
 function pushSync(){ if(SYNC.mode!=='chart') return; const u=syncPath(); if(!u) return; syncState.pending=true; clearTimeout(syncTimer); syncTimer=setTimeout(doPush,800); }
 async function doPush(){ const u=syncPath(); if(!u||syncState.busy) return; syncState.busy=true;
-  try{ const body=JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays,ts:Date.now()});
+  try{ const body=JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays,ui:{oppId:S.ui.oppId,gameId:S.ui.gameId},ts:Date.now()});
     const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body}); if(!r.ok) throw new Error('HTTP '+r.status);
     syncState.last=Date.now(); syncState.err=''; syncState.pending=false; }
   catch(e){ syncState.err=String(e.message||e); setTimeout(doPush,5000); }
   finally{ syncState.busy=false; renderSyncBadge(); } }
 let es=null, pollTimer=null;
-function applyRemote(remote){ if(!remote||!remote.plays) return; const ui=S.ui; S={lib:remote.lib,opponents:remote.opponents,games:remote.games,plays:remote.plays,ui}; 
+let lastRemoteUi='';
+function applyRemote(remote){ if(!remote||!remote.plays) return; const ui=S.ui||{}; S={lib:remote.lib,opponents:remote.opponents,games:remote.games,plays:remote.plays,ui};
+  const ru=remote.ui?remote.ui.oppId+'|'+remote.ui.gameId:''; if(remote.ui && (ru!==lastRemoteUi || !S.opponents.find(o=>o.id===S.ui.oppId))){ S.ui.oppId=remote.ui.oppId; S.ui.gameId=remote.ui.gameId; lastRemoteUi=ru; }
   if(!S.opponents.find(o=>o.id===S.ui.oppId)){ S.ui.oppId=S.opponents[0]&&S.opponents[0].id; }
   if(!S.games.find(g=>g.id===S.ui.gameId)){ const gs=S.games.filter(g=>g.oppId===S.ui.oppId); S.ui.gameId=gs.length?gs[gs.length-1].id:null; }
   S.plays.forEach(p=>{ try{ p.d=derive(p); }catch(e){} });
@@ -563,7 +568,7 @@ function computeNext(e){
 function board(cat){ const o=opp(); if(!o) return []; return (o[cat]||[]).filter(x=>S.lib[cat].includes(x)); }
 
 /* ============================================================ RENDER */
-function render(){ renderTop(); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===view));
+function render(){ if(SYNC.mode==='view'&&(view==='chart'||view==='opponents')) view='reports'; renderTop(); document.querySelectorAll('.view').forEach(v=>v.classList.toggle('on',v.id===view));
   ({chart:renderChart, log:renderLog, reports:renderReports, opponents:renderOpponents, export:renderExport})[view]();
 }
 
@@ -571,12 +576,14 @@ function renderTop(){
   const g=game(), o=opp(); setTimeout(renderSyncBadge,0);
   const half = g && g.qtr>=3 ? 1:0;
   const tos=(team)=>{ const t=g.to[team]; let h=''; for(let hh=0;hh<2;hh++){ for(let i=0;i<3;i++) h+=`<i class="${i<t[hh]?'on':''}"></i>`; if(hh===0) h+='<i class="gap"></i>'; } return h; };
+  const RO=SYNC.mode==='view';
   document.getElementById('top').innerHTML = `
+    ${RO?`<div class="viewbar">VIEWER · READ ONLY · mirrors the charting iPad</div>`:''}
     <div class="brand"><span class="nd">ND</span> PIOS DEFENSE <span class="sub">TENDENCY CHART</span></div><span id="syncBadge" class="hidden" style="margin-left:6px"></span>
     <select class="sel" data-act="pickOpp" aria-label="Opponent">${S.opponents.map(x=>`<option value="${x.id}" ${x.id===S.ui.oppId?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
-    <select class="sel" data-act="pickGame" aria-label="Game">${S.games.filter(x=>x.oppId===S.ui.oppId).map(x=>`<option value="${x.id}" ${x.id===S.ui.gameId?'selected':''}>${esc(x.label)} · ${x.date}${x.ended?' · FINAL':''}</option>`).join('')}<option value="__new">+ New game…</option></select>
-    <nav class="nav">${[['chart','Chart'],['log','Play Log'],['reports','Reports'],['opponents','Opponents'],['export','Export']].map(([k,l])=>`<button class="${view===k?'on':''}" data-act="view" data-v="${k}">${l}</button>`).join('')}</nav>
-    ${g?`<div class="score">
+    <select class="sel" data-act="pickGame" aria-label="Game">${S.games.filter(x=>x.oppId===S.ui.oppId).map(x=>`<option value="${x.id}" ${x.id===S.ui.gameId?'selected':''}>${esc(x.label)} · ${x.date}${x.ended?' · FINAL':''}</option>`).join('')}${SYNC.mode==='view'?'':'<option value="__new">+ New game…</option>'}</select>
+    <nav class="nav">${(SYNC.mode==='view'?[['log','Play Log'],['reports','Reports'],['export','Settings']]:[['chart','Chart'],['log','Play Log'],['reports','Reports'],['opponents','Opponents'],['export','Export']]).map(([k,l])=>`<button class="${view===k?'on':''}" data-act="view" data-v="${k}">${l}</button>`).join('')}</nav>
+    ${g?`<div class="score${RO?' ro':''}">
       <div class="team"><span class="nm opp" title="${esc(o.name)}">${esc(o.name.split(' ')[0])}</span><button class="mini" data-act="score" data-team="opp" data-d="-1" aria-label="minus">−</button><span class="pts">${g.score.opp}</span><button class="mini" data-act="score" data-team="opp" data-d="1" aria-label="plus">+</button><span class="tos" style="color:var(--ice)">${tos('opp')}</span><button class="to-btn" data-act="to" data-team="opp">TO</button></div>
       <div class="vsep"></div>
       <div class="team${g.ackScore===false?' pend':''}" ${g.ackScore===false?'data-act="ackScore" title="Tap to confirm ND score"':''}><span class="nm us">${esc(o.us||'US')}</span><button class="mini" data-act="score" data-team="us" data-d="-1" aria-label="minus">−</button><span class="pts" data-act="ackScore" style="cursor:pointer">${g.score.us}</span><button class="mini" data-act="score" data-team="us" data-d="1" aria-label="plus">+</button><span class="tos" style="color:var(--accent)">${tos('us')}</span><button class="to-btn" data-act="to" data-team="us">TO</button></div>
@@ -786,9 +793,11 @@ function playSummary(p){
 
 /* ---------- actions ---------- */
 let pen = {on:'DEF',yds:5,dn:'REPLAY',ball:'LIVE'};
+const VIEW_OK=new Set(['view','pickOpp','pickGame','repScope','repTab','repSub','rpFilter','downPick','goRep','pdf','print','logGame','closeModal','syncMode','syncTest','logQ','ackScore','ackQtr']);
 document.addEventListener('click', async e=>{
   const b = e.target.closest('[data-act]'); if(!b) return;
   const a = b.dataset.act;
+  if(SYNC.mode==='view' && !VIEW_OK.has(a)){ toast('VIEWER — read only. Chart on the main iPad.'); return; }
   const g=game();
   switch(a){
     case 'view': view=b.dataset.v; penOpen=false; render(); break;
@@ -1035,7 +1044,7 @@ function renderLogTable(){
   const ps=logPlays();
   const gid=logFilter.gameId;
   document.getElementById('logTable').innerHTML=`<table class="tbl"><thead><tr>${['','Play','Snip #','Qtr','Ser','D&D','Hash','Ball','Pers','Backfield','BF Type','Form','Str','Motion','Type','Dir','S/W','F/B','Back','Concept','Players','Result','Yds','Zone',''].map(h=>`<th>${h}</th>`).join('')}</tr></thead>
-  <tbody>${ps.length?ps.map(p=>`<tr class="${p.id===editId?'sel':''}"><td class="noprint" style="white-space:nowrap"><button class="sm" data-act="editPlay" data-id="${p.id}">Edit</button> <button class="sm warn" data-act="deletePlay" data-id="${p.id}">✕</button></td>${playRow(p).map((c,i)=>`<td class="${i===21?'r':''}${i===1?' snipc':''}">${esc(c)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="24" class="note">No plays${gid==='current'?' in this game yet':''}.</td></tr>`}</tbody></table>`;
+  <tbody>${ps.length?ps.map(p=>`<tr class="${p.id===editId?'sel':''}"><td class="noprint" style="white-space:nowrap">${SYNC.mode==='view'?'<span class="note">view</span>':`<button class="sm" data-act="editPlay" data-id="${p.id}">Edit</button> <button class="sm warn" data-act="deletePlay" data-id="${p.id}">✕</button>`}</td>${playRow(p).map((c,i)=>`<td class="${i===21?'r':''}${i===1?' snipc':''}">${esc(c)}</td>`).join('')}</tr>`).join(''):`<tr><td colspan="24" class="note">No plays${gid==='current'?' in this game yet':''}.</td></tr>`}</tbody></table>`;
 }
 
 /* ============================================================ REPORTS */
@@ -1643,7 +1652,7 @@ function renderExport(){
   const g=game(), o=opp();
   const size=(localStorage.getItem(KEY)||'').length;
   document.getElementById('export').innerHTML=`
-  <div class="form-row">
+  ${SYNC.mode==='view'?'':`<div class="form-row">
     <div class="panel">
       <div class="ph"><b>EXPORT PLAYS (CSV)</b><small>opens in Excel / Sheets</small></div>
       <div class="list">
@@ -1663,7 +1672,7 @@ function renderExport(){
       </div>
       <div class="note">Data lives only in this browser on this device. Back up after every game. To move to another device, import the backup there — opponents, games and plays are merged by ID so nothing duplicates.</div>
     </div>
-  </div>
+  </div>`}
   <div class="panel">
     <div class="ph"><b>LIVE SYNC</b><small>chart on one iPad · view updating reports on any other device</small></div>
     <div class="form-row">

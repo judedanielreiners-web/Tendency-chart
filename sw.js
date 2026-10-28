@@ -1,5 +1,5 @@
 // ND Pios Tendency Chart — offline cache. Bump CACHE to ship a new build.
-const CACHE = 'nd-tendency-v67';
+const CACHE = 'nd-tendency-v69';
 const FILES = ['./', './index.html', './manifest.json', './icon-180.png', './icon-192.png', './icon-512.png'];
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
