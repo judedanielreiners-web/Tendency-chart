@@ -434,20 +434,28 @@ function syncPath(){ if(!SYNC.url||!SYNC.room) return null; const base=SYNC.url.
 let syncTimer=null, syncState={last:0,err:'',pending:false,busy:false};
 function pushSync(){ if(SYNC.mode!=='chart') return; const u=syncPath(); if(!u) return; syncState.pending=true; clearTimeout(syncTimer); syncTimer=setTimeout(doPush,800); }
 async function doPush(){ const u=syncPath(); if(!u||syncState.busy) return; syncState.busy=true;
-  try{ const body=JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays,ui:{oppId:S.ui.oppId,gameId:S.ui.gameId},ts:Date.now()});
+  // The whole state travels as ONE JSON string: Firebase silently drops empty arrays/objects
+  // (a new opponent with no roster, a new game with no plays), which made viewers ignore the update.
+  try{ const body=JSON.stringify({v:2,blob:JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays}),ui:{oppId:S.ui.oppId||'',gameId:S.ui.gameId||''},ts:Date.now()});
     const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body}); if(!r.ok) throw new Error('HTTP '+r.status);
     syncState.last=Date.now(); syncState.err=''; syncState.pending=false; }
   catch(e){ syncState.err=String(e.message||e); setTimeout(doPush,5000); }
   finally{ syncState.busy=false; renderSyncBadge(); } }
 let es=null, pollTimer=null;
 let lastRemoteUi='';
-function applyRemote(remote){ if(!remote||!remote.plays) return; const ui=S.ui||{}; S={lib:remote.lib,opponents:remote.opponents,games:remote.games,plays:remote.plays,ui};
+function applyRemote(remote){ if(!remote) return; let st=remote;
+  if(typeof remote.blob==='string'){ try{ st=JSON.parse(remote.blob); }catch(e){ syncState.err='bad data from charting device'; renderSyncBadge(); return; } }
+  if(!st.lib||!st.opponents) return;
+  const arr=x=>Array.isArray(x)?x:(x&&typeof x==='object'?Object.values(x):[]);
+  const ui=S.ui||{}; S={lib:st.lib,opponents:arr(st.opponents),games:arr(st.games),plays:arr(st.plays),ui};
+  const dl=defaultState().lib; Object.keys(dl).forEach(k=>{ if(Array.isArray(dl[k])) S.lib[k]=arr(S.lib[k]); });
+  try{ S.opponents.forEach(o=>{ if(!o.concepts) rebuildConcepts(o, S); }); }catch(e){}
   const ru=remote.ui?remote.ui.oppId+'|'+remote.ui.gameId:''; if(remote.ui && (ru!==lastRemoteUi || !S.opponents.find(o=>o.id===S.ui.oppId))){ S.ui.oppId=remote.ui.oppId; S.ui.gameId=remote.ui.gameId; lastRemoteUi=ru; }
   if(!S.opponents.find(o=>o.id===S.ui.oppId)){ S.ui.oppId=S.opponents[0]&&S.opponents[0].id; }
   if(!S.games.find(g=>g.id===S.ui.gameId)){ const gs=S.games.filter(g=>g.oppId===S.ui.oppId); S.ui.gameId=gs.length?gs[gs.length-1].id:null; }
   S.plays.forEach(p=>{ try{ p.d=derive(p); }catch(e){} });
   syncState.last=remote.ts||Date.now(); syncState.err=''; try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){}
-  if(view==='reports'||view==='log') render(); else renderTop(); renderSyncBadge(); }
+  try{ if(view==='export') renderTop(); else render(); }catch(e){ console.error(e); syncState.err='render error: '+(e.message||e); } renderSyncBadge(); }
 function startViewer(){ stopViewer(); const u=syncPath(); if(!u) return;
   const first=async()=>{ try{ const r=await fetch(u,{cache:'no-store'}); if(r.ok) applyRemote(await r.json()); }catch(e){ syncState.err=String(e.message||e); renderSyncBadge(); } };
   first();
