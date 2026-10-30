@@ -489,7 +489,7 @@ function opp(){ return S.opponents.find(o=>o.id===S.ui.oppId); }
 function gamePlays(g){ return S.plays.filter(p=>p.gameId===(g||game()).id).sort((a,b)=>a.n-b.n); }
 
 /* ---------- field math ---------- */
-function fmtSpot(side,yl){ if(yl==null) return '—'; return (side==='OWN'?'−':'+')+yl; }
+function fmtSpot(side,yl){ if(yl==null) return '—'; if(+yl===50) return '50'; return (side==='OWN'?'−':'+')+yl; }
 function toGoal(side,yl){ if(yl==null) return null; return side==='OPP'? +yl : 100-(+yl); }
 function fromGoal(tg){ tg=Math.max(1,Math.min(99,Math.round(tg))); return tg<=50? {side:'OPP',yl:tg} : {side:'OWN',yl:100-tg}; }
 function fieldZone(tg){ if(tg==null) return null; if(tg<=5) return 'GOAL LINE'; if(tg<=20) return 'RED ZONE'; if(tg<=40) return 'FRINGE'; if(tg>=90) return 'BACKED UP'; return 'OPEN FIELD'; }
@@ -658,36 +658,45 @@ function fitChart(){
   fitKey=key; fitZoom=z; el.style.zoom=String(z);
 }
 window.addEventListener('resize',()=>{ fitKey=null; fitChart(); });
-let wheelTimer=null;
-let wheelTimer2=null;
+/* Wheels. Position is set and read from what is VISUALLY in the window (getBoundingClientRect),
+   never from index × item height — page zoom (fitChart) made those disagree on the iPad and the
+   wheel would land a few items off. A wheel only accepts a value after the coach touches it, so a
+   programmatic re-position or a scroll-snap settle can never change a value (the phantom "+3"). */
+function wheelTopIdx(wl){ const wr=wl.getBoundingClientRect(); let best=0,bd=1e9; const it=wl.children;
+  for(let i=0;i<it.length;i++){ const d=Math.abs(it[i].getBoundingClientRect().top-wr.top); if(d<bd){bd=d;best=i;} } return best; }
+function placeWheel(wl, idx){ const it=wl.children; if(!it.length) return; idx=Math.max(0,Math.min(it.length-1,idx));
+  wl.scrollTop=it[idx].offsetTop-it[0].offsetTop;
+  for(let k=0;k<4;k++){ const wr=wl.getBoundingClientRect(), ir=it[idx].getBoundingClientRect(); if(!ir.height) break;
+    const d=(ir.top-wr.top)/ir.height; if(Math.abs(d)<0.15) break;
+    const upi=(it[1]?(it[1].offsetTop-it[0].offsetTop):ir.height)||ir.height; wl.scrollTop=wl.scrollTop+d*upi; } }
+function setupWheel(w, idxNow, onPick, locked){
+  const wl=w.querySelector('.wl'); let touched=false, t=null;
+  const put=()=>placeWheel(wl, idxNow());
+  put(); requestAnimationFrame(put); setTimeout(put,250);
+  if(locked){ wl.style.overflow='hidden'; return; }
+  ['touchstart','pointerdown','wheel','keydown'].forEach(ev=>w.addEventListener(ev,()=>{ touched=true; },{passive:true}));
+  wl.addEventListener('scroll',()=>{ if(!touched) return; clearTimeout(t); t=setTimeout(()=>onPick(wheelTopIdx(wl)),160); },{passive:true});
+  w.addEventListener('click',e=>{ const r=w.getBoundingClientRect(); onPick(null, (e.clientY-r.top)<r.height/2 ? 1 : -1); });
+}
 function wireWheel(){
-  // yard line: index 0 = '—' (unset), 1..50
+  // yard line: index i → 50-i (1..50), last index = '—' (unset)
   const w=document.querySelector('#chart .wheel[data-wheel=yl]');
-  if(w){ const wl=w.querySelector('.wl'); const ih=wl.firstElementChild.offsetHeight||34;
-    const idx=cur.yl==null?50:50-cur.yl; wl.scrollTop=idx*ih; w.dataset.ih=ih; const armed=Date.now()+120; requestAnimationFrame(()=>{ wl.scrollTop=idx*ih; });
-    wl.addEventListener('scroll',()=>{ if(Date.now()<armed) return; clearTimeout(wheelTimer); wheelTimer=setTimeout(()=>{ const i=Math.round(wl.scrollTop/ih); const v=i>=50?null:Math.max(1,50-i); if(v!==cur.yl){ cur.yl=v; renderChart(); } },140); },{passive:true});
-    w.addEventListener('click',e=>{ const r=w.getBoundingClientRect(); const up=(e.clientY-r.top)<r.height/2; const nv=cur.yl==null?1:Math.max(1,Math.min(50,cur.yl+(up?1:-1))); if(nv!==cur.yl){ cur.yl=nv; renderChart(); } });
-  }
+  if(w) setupWheel(w, ()=>cur.yl==null?50:50-cur.yl, (i,step)=>{
+    let v; if(step) v=cur.yl==null?50:Math.max(1,Math.min(50,cur.yl+step)); else v=i>=50?null:Math.max(1,50-i);
+    if(v!==cur.yl){ cur.yl=v; renderChart(); } });
   // snip #: index i → 180-i, range 1..180
   const sn=document.querySelector('#chart .wheel[data-wheel=snip]');
-  if(sn){ const g=game(); const wl=sn.querySelector('.wl'); const ih=wl.firstElementChild.offsetHeight||32;
-    const want=(180-(+g.snipNext||1))*ih; wl.scrollTop=want; sn.dataset.ih=ih; const armed=Date.now()+120; requestAnimationFrame(()=>{ wl.scrollTop=want; });
-    let t3=null;
-    wl.addEventListener('scroll',()=>{ if(Date.now()<armed) return; clearTimeout(t3); t3=setTimeout(()=>{ const i=Math.round(wl.scrollTop/ih); const v=Math.max(1,Math.min(180,180-i)); if(v!==g.snipNext||g.ackSnip===false){ g.snipNext=v; g.ackSnip=true; save(); renderChart(); } },140); },{passive:true});
-    sn.addEventListener('click',e=>{ const r=sn.getBoundingClientRect(); const up=(e.clientY-r.top)<r.height/2; g.snipNext=Math.max(1,Math.min(180,(+g.snipNext||1)+(up?1:-1))); g.ackSnip=true; save(); renderChart(); });
-  }
-  // yards: index i = i-50, range −50..+99
+  if(sn){ const g=game(); setupWheel(sn, ()=>180-(+g.snipNext||1), (i,step)=>{
+    const v= step ? Math.max(1,Math.min(180,(+g.snipNext||1)+step)) : Math.max(1,Math.min(180,180-i));
+    if(v!==g.snipNext||g.ackSnip===false){ g.snipNext=v; g.ackSnip=true; save(); renderChart(); } }); }
+  // yards: index i → 99-i, range +99..−50
   const y=document.querySelector('#chart .wheel[data-wheel=yds]');
-  if(y){ const wl=y.querySelector('.wl'); const ih=wl.firstElementChild.offsetHeight||34; const locked=y.classList.contains('locked');
-    const want=(99-(+cur.yds||0))*ih; wl.scrollTop=want; y.dataset.ih=ih; const armed=Date.now()+120; requestAnimationFrame(()=>{ wl.scrollTop=want; });
-    if(!locked){
-      wl.addEventListener('scroll',()=>{ if(Date.now()<armed) return; clearTimeout(wheelTimer2); wheelTimer2=setTimeout(()=>{ const i=Math.round(wl.scrollTop/ih); const v=Math.max(-50,Math.min(99,99-i)); if(v!==cur.yds){ cur.yds=v; cur.ydsTouched=true; renderChart(); } else if(!cur.ydsTouched){ cur.ydsTouched=true; renderChart(); } },140); },{passive:true});
-      y.addEventListener('click',e=>{ const r=y.getBoundingClientRect(); const up=(e.clientY-r.top)<r.height/2; const nv=Math.max(-50,Math.min(99,(+cur.yds||0)+(up?1:-1))); cur.yds=nv; cur.ydsTouched=true; renderChart(); });
-    } else { wl.style.overflow='hidden'; }
-  }
+  if(y) setupWheel(y, ()=>99-(+cur.yds||0), (i,step)=>{
+    const v= step ? Math.max(-50,Math.min(99,(+cur.yds||0)+step)) : Math.max(-50,Math.min(99,99-i));
+    if(v!==cur.yds||!cur.ydsTouched){ cur.yds=v; cur.ydsTouched=true; renderChart(); } }, y.classList.contains('locked'));
 }
 function renderChart(){
-  const el=document.getElementById('chart'); el.innerHTML=chartHTML(); wireWheel(); fitChart();
+  const el=document.getElementById('chart'); el.innerHTML=chartHTML(); fitChart(); wireWheel();
 }
 function chartHTML(){
   const g=game(), o=opp();
@@ -715,7 +724,7 @@ function chartHTML(){
     <div class="sit5">
       <div class="grp"><span class="lbl">Down</span><div class="g4">${[1,2,3,4].map(d=>`<button class="btn big ${cur.down===d?'on':''}" data-act="set" data-f="down" data-v="${d}">${d}</button>`).join('')}</div></div>
       <div class="grp"><label class="lbl" for="dist">Distance <em>· ${tg!=null&&cur.dist>=tg?'GOAL':distBucket(cur.dist)}</em></label><div class="stepper"><button class="btn step" data-act="stepDist" data-d="-1">−</button><input class="num" id="dist" type="number" inputmode="numeric" value="${cur.dist}" data-f="dist"><button class="btn step" data-act="stepDist" data-d="1">+</button></div></div>
-      <div class="grp${cur.yl==null?' pend':''}"><label class="lbl" for="yl">Ball on ${fieldZone(tg)?`<em class="${/RED|GOAL/.test(fieldZone(tg))?'rz':''}">· ${fieldZone(tg)}</em>`:''}</label><div class="stepper"><button class="btn ${cur.side==='OWN'?'on':''}" style="padding:0 12px;font-size:22px;font-family:var(--mono)" data-act="set" data-f="side" data-v="OWN" title="Own side (minus)">−</button><button class="btn ${cur.side==='OPP'?'on':''}" style="padding:0 12px;font-size:22px;font-family:var(--mono)" data-act="set" data-f="side" data-v="OPP" title="Opponent side (plus)">+</button><div class="wheel ${cur.yl==null?'need':''}" id="yl" data-wheel="yl" tabindex="0"><div class="wl">${[...Array.from({length:50},(_,i)=>50-i),'—'].map(v=>`<div class="wi">${v}</div>`).join('')}</div></div></div></div>
+      <div class="grp${cur.yl==null?' pend':''}"><label class="lbl" for="yl">Ball on ${fieldZone(tg)?`<em class="${/RED|GOAL/.test(fieldZone(tg))?'rz':''}">· ${fieldZone(tg)}</em>`:''}</label><div class="stepper"><button class="btn ${cur.side==='OWN'&&cur.yl!==50?'on':''}" style="padding:0 12px;font-size:22px;font-family:var(--mono)" data-act="set" data-f="side" data-v="OWN" title="Own side (minus)">−</button><button class="btn ${cur.side==='OPP'&&cur.yl!==50?'on':''}" style="padding:0 12px;font-size:22px;font-family:var(--mono)" data-act="set" data-f="side" data-v="OPP" title="Opponent side (plus)">+</button><div class="wheel ${cur.yl==null?'need':''}" id="yl" data-wheel="yl" tabindex="0"><div class="wl">${[...Array.from({length:50},(_,i)=>50-i),'—'].map(v=>`<div class="wi">${v}</div>`).join('')}</div></div></div></div>
       <div class="grp${pend('yds')}"><label class="lbl" for="yds">Yards +/−</label><div class="stepper"><button class="btn step ten" data-act="stepYds" data-d="-10" title="−10">−10</button><div class="wheel yds ${ydsCls} ${ZERO_YD_RESULTS.has(cur.result)?'locked':''}" id="yds" data-wheel="yds" tabindex="0"><div class="wl">${Array.from({length:150},(_,i)=>99-i).map(v=>`<div class="wi${v===0?' zero':''}">${v>0?'+'+v:v}</div>`).join('')}</div></div><button class="btn step ten" data-act="stepYds" data-d="10" title="+10">+10</button></div></div>
       <div class="grp"><span class="lbl">Next play auto</span><div class="preview">${previewTxt}</div></div>
     </div>
@@ -1198,7 +1207,7 @@ function driveSummary(plays){ // plays of one series, in order
   const n=plays.length, yds=plays.reduce((a,p)=>a+(+p.yds||0),0); const last=plays[n-1];
   const firsts=plays.filter(p=>{ const need=p.d.tg!=null&&p.dist>=p.d.tg?p.d.tg:p.dist; return (+p.yds||0)>=need || /TD$/.test(p.result); }).length;
   let res='—'; if(last){ if(/TD$/.test(last.result)) res='TD'; else if(last.result==='INTERCEPTION') res='INT'; else if(FUMBLE_RESULTS.has(last.result)&&!last.fumRec) res='FUMBLE LOST'; else if(last.down===4) res='DOWNS / PUNT / FG'; else res='ongoing'; }
-  const start=plays[0]? `${plays[0].side} ${plays[0].yl}`:'—';
+  const start=plays[0]? fmtSpot(plays[0].side,plays[0].yl):'—';
   const {r,pa}=rp(plays);
   return {n,yds,firsts,res,start,r,pa};
 }
@@ -1446,7 +1455,7 @@ function tabHTML(tab, all){
       const [,lastDrive]=series[0]; const ds=driveSummary(lastDrive); const lf=filtered(lastDrive);
       return `<h4>Last drive — series ${lastDrive[0].series} · Q${lastDrive[0].qtr} · started ${ds.start} <span class="note">· ${ds.n} plays · ${ds.yds} yds · ${ds.firsts} first downs · ${ds.res}</span></h4>
       <table class="tbl"><thead><tr><th>#</th><th>D&D</th><th>Ball</th><th>Hash</th><th>Pers</th><th>Formation</th><th>Motion</th><th>Type</th><th>Dir</th><th>S/W</th><th>F/B</th><th>Concept</th><th>Players</th><th>Result</th><th class="r">Yds</th></tr></thead><tbody>
-      ${lf.map(p=>`<tr><td><b>${p.n}</b></td><td>${ddLabel(p)}</td><td>${p.side} ${p.yl}</td><td>${p.hash||''}</td><td>${p.pers||''}</td><td>${esc(p.d.formation)}</td><td>${p.motion&&p.motion!=='NONE'?esc(p.motion):''}</td><td>${p.type}</td><td>${p.dir||''}</td><td>${p.d.sw||''}</td><td>${p.d.fb||''}</td><td>${esc(p.concept)}</td><td>${p.players.map(x=>'#'+x).join(' ')}</td><td>${fmtRes(p)}</td><td class="r">${p.yds}</td></tr>`).join('')}</tbody></table>
+      ${lf.map(p=>`<tr><td><b>${p.n}</b></td><td>${ddLabel(p)}</td><td>${fmtSpot(p.side,p.yl)}</td><td>${p.hash||''}</td><td>${p.pers||''}</td><td>${esc(p.d.formation)}</td><td>${p.motion&&p.motion!=='NONE'?esc(p.motion):''}</td><td>${p.type}</td><td>${p.dir||''}</td><td>${p.d.sw||''}</td><td>${p.d.fb||''}</td><td>${esc(p.concept)}</td><td>${p.players.map(x=>'#'+x).join(' ')}</td><td>${fmtRes(p)}</td><td class="r">${p.yds}</td></tr>`).join('')}</tbody></table>
       <div class="charts">${heatMap(heatTitle('LAST DRIVE — DOWN × DISTANCE').toUpperCase(),'', ['1st','2nd','3rd','4th'], ['SHORT','MED','LONG','GOAL'], heatOf(lf,DOWN_LABEL,null,DIST_GROUP,null,'pass'))}</div>
       <h4>Last drive tendencies</h4>${tendTable(groupBy(lf,p=>p.d.formation),{label:'Formation',extra:SW_EXTRA.concat([TOPC,TOPPC])})}
       <h4>All drives <span class="note">· newest first</span></h4>
