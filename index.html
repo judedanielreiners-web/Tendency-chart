@@ -95,6 +95,7 @@ a{color:var(--blue)}
 .ph{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
 .ph b{font-family:var(--condensed);font-size:16px;font-weight:700;letter-spacing:3px;color:#fff;text-shadow:0 0 10px rgba(110,231,255,.35)}
 .ph small{color:var(--dim);font-size:11px}
+.clrY{height:18px;padding:0 8px;border-radius:3px;border:1px solid var(--amber);background:rgba(255,210,60,.08);color:var(--amber);font:700 10px/16px var(--mono);letter-spacing:1.5px;cursor:pointer}
 .lbl{font-size:10px;text-transform:uppercase;letter-spacing:2.2px;color:var(--muted);font-weight:600;font-family:var(--mono)}
 .lbl:before{content:'▸ ';color:var(--accent);opacity:.8}
 .lbl em{font-style:normal;color:var(--accent)} .lbl em.rz{color:var(--red2)} .lbl span{color:var(--dim)}
@@ -490,8 +491,14 @@ function gamePlays(g){ return S.plays.filter(p=>p.gameId===(g||game()).id).sort(
 
 /* ---------- field math ---------- */
 function fmtSpot(side,yl){ if(yl==null) return '—'; if(+yl===50) return '50'; return (side==='OWN'?'−':'+')+yl; }
-function toGoal(side,yl){ if(yl==null) return null; return side==='OPP'? +yl : 100-(+yl); }
-function fromGoal(tg){ tg=Math.max(1,Math.min(99,Math.round(tg))); return tg<=50? {side:'OPP',yl:tg} : {side:'OWN',yl:100-tg}; }
+/* TRUE YARD LINE — every spot on the field is one number 1..99:
+   1 = −1 (our own 1) … 49 = −49 · 50 = 50 · 51 = +49 … 99 = +1 (their 1).
+   All field math runs on it: next spot = true + yards, so crossing the 50 flips −/+ by itself. */
+function trueYL(side,yl){ if(yl==null) return null; yl=+yl; if(yl===50) return 50; return side==='OPP'? 100-yl : yl; }
+function fromTrue(t){ t=Math.max(1,Math.min(99,Math.round(t))); return t<50? {side:'OWN',yl:t} : t===50? {side:'OWN',yl:50} : {side:'OPP',yl:100-t}; }
+function trueLabel(t){ return t==null?'—' : t<50?'−'+t : t===50?'50' : '+'+(100-t); }
+function toGoal(side,yl){ const t=trueYL(side,yl); return t==null? null : 100-t; }
+function fromGoal(tg){ return fromTrue(100-tg); }
 function fieldZone(tg){ if(tg==null) return null; if(tg<=5) return 'GOAL LINE'; if(tg<=20) return 'RED ZONE'; if(tg<=40) return 'FRINGE'; if(tg>=90) return 'BACKED UP'; return 'OPEN FIELD'; }
 function ddLabel(e){ if(!e.down) return ''; const tg=toGoal(e.side,e.yl); const goal = tg!=null && e.dist>=tg; return `${e.down}${['st','nd','rd','th'][e.down-1]} & ${goal?'GOAL':e.dist}`; }
 function ddBucket(e){ const tg=toGoal(e.side,e.yl); if(tg!=null && e.dist>=tg) return `${e.down}&GOAL`; if(e.down===1&&e.dist===10) return '1&10'; return `${e.down}&${distBucket(e.dist)}`; }
@@ -662,6 +669,7 @@ window.addEventListener('resize',()=>{ fitKey=null; fitChart(); });
    never from index × item height — page zoom (fitChart) made those disagree on the iPad and the
    wheel would land a few items off. A wheel only accepts a value after the coach touches it, so a
    programmatic re-position or a scroll-snap settle can never change a value (the phantom "+3"). */
+function setTrue(t){ if(t==null){ cur.yl=null; return; } const p=fromTrue(t); cur.side=p.side; cur.yl=p.yl; }
 function wheelTopIdx(wl){ const wr=wl.getBoundingClientRect(); let best=0,bd=1e9; const it=wl.children;
   for(let i=0;i<it.length;i++){ const d=Math.abs(it[i].getBoundingClientRect().top-wr.top); if(d<bd){bd=d;best=i;} } return best; }
 function placeWheel(wl, idx){ const it=wl.children; if(!it.length) return; idx=Math.max(0,Math.min(it.length-1,idx));
@@ -679,11 +687,12 @@ function setupWheel(w, idxNow, onPick, locked){
   w.addEventListener('click',e=>{ const r=w.getBoundingClientRect(); onPick(null, (e.clientY-r.top)<r.height/2 ? 1 : -1); });
 }
 function wireWheel(){
-  // yard line: index i → 50-i (1..50), last index = '—' (unset)
+  // yard line: index i → true yard line 99-i (+1 at the top … 50 … −1), last index = '—' (unset)
   const w=document.querySelector('#chart .wheel[data-wheel=yl]');
-  if(w) setupWheel(w, ()=>cur.yl==null?50:50-cur.yl, (i,step)=>{
-    let v; if(step) v=cur.yl==null?50:Math.max(1,Math.min(50,cur.yl+step)); else v=i>=50?null:Math.max(1,50-i);
-    if(v!==cur.yl){ cur.yl=v; renderChart(); } });
+  if(w) setupWheel(w, ()=>{ const t=trueYL(cur.side,cur.yl); return t==null?99:99-t; }, (i,step)=>{
+    const t0=trueYL(cur.side,cur.yl); let t;
+    if(step) t= t0==null? 50 : Math.max(1,Math.min(99,t0+step)); else t= i>=99? null : Math.max(1,Math.min(99,99-i));
+    if(t!==t0){ setTrue(t); renderChart(); } });
   // snip #: index i → 180-i, range 1..180
   const sn=document.querySelector('#chart .wheel[data-wheel=snip]');
   if(sn){ const g=game(); setupWheel(sn, ()=>180-(+g.snipNext||1), (i,step)=>{
@@ -724,8 +733,8 @@ function chartHTML(){
     <div class="sit5">
       <div class="grp"><span class="lbl">Down</span><div class="g4">${[1,2,3,4].map(d=>`<button class="btn big ${cur.down===d?'on':''}" data-act="set" data-f="down" data-v="${d}">${d}</button>`).join('')}</div></div>
       <div class="grp"><label class="lbl" for="dist">Distance <em>· ${tg!=null&&cur.dist>=tg?'GOAL':distBucket(cur.dist)}</em></label><div class="stepper"><button class="btn step" data-act="stepDist" data-d="-1">−</button><input class="num" id="dist" type="number" inputmode="numeric" value="${cur.dist}" data-f="dist"><button class="btn step" data-act="stepDist" data-d="1">+</button></div></div>
-      <div class="grp${cur.yl==null?' pend':''}"><label class="lbl" for="yl">Ball on ${fieldZone(tg)?`<em class="${/RED|GOAL/.test(fieldZone(tg))?'rz':''}">· ${fieldZone(tg)}</em>`:''}</label><div class="stepper"><button class="btn ${cur.side==='OWN'&&cur.yl!==50?'on':''}" style="padding:0 12px;font-size:22px;font-family:var(--mono)" data-act="set" data-f="side" data-v="OWN" title="Own side (minus)">−</button><button class="btn ${cur.side==='OPP'&&cur.yl!==50?'on':''}" style="padding:0 12px;font-size:22px;font-family:var(--mono)" data-act="set" data-f="side" data-v="OPP" title="Opponent side (plus)">+</button><div class="wheel ${cur.yl==null?'need':''}" id="yl" data-wheel="yl" tabindex="0"><div class="wl">${[...Array.from({length:50},(_,i)=>50-i),'—'].map(v=>`<div class="wi">${v}</div>`).join('')}</div></div></div></div>
-      <div class="grp${pend('yds')}"><label class="lbl" for="yds">Yards +/−</label><div class="stepper"><button class="btn step ten" data-act="stepYds" data-d="-10" title="−10">−10</button><div class="wheel yds ${ydsCls} ${ZERO_YD_RESULTS.has(cur.result)?'locked':''}" id="yds" data-wheel="yds" tabindex="0"><div class="wl">${Array.from({length:150},(_,i)=>99-i).map(v=>`<div class="wi${v===0?' zero':''}">${v>0?'+'+v:v}</div>`).join('')}</div></div><button class="btn step ten" data-act="stepYds" data-d="10" title="+10">+10</button></div></div>
+      <div class="grp${cur.yl==null?' pend':''}"><label class="lbl" for="yl">Ball on ${fieldZone(tg)?`<em class="${/RED|GOAL/.test(fieldZone(tg))?'rz':''}">· ${fieldZone(tg)}</em>`:''}</label><div class="stepper"><button class="btn step ten" data-act="stepYl" data-d="-10" title="10 yards toward our goal">−10</button><div class="wheel ${cur.yl==null?'need':''}" id="yl" data-wheel="yl" tabindex="0"><div class="wl">${[...Array.from({length:99},(_,i)=>99-i),null].map(t=>`<div class="wi">${trueLabel(t)}</div>`).join('')}</div></div><button class="btn step ten" data-act="stepYl" data-d="10" title="10 yards toward their goal">+10</button></div></div>
+      <div class="grp${pend('yds')}"><div style="display:flex;align-items:center;justify-content:space-between;gap:6px"><label class="lbl" for="yds">Yards +/−</label><button class="clrY" data-act="clearYds" title="Reset yards to 0">CLEAR</button></div><div class="stepper"><button class="btn step ten" data-act="stepYds" data-d="-10" title="−10">−10</button><div class="wheel yds ${ydsCls} ${ZERO_YD_RESULTS.has(cur.result)?'locked':''}" id="yds" data-wheel="yds" tabindex="0"><div class="wl">${Array.from({length:150},(_,i)=>99-i).map(v=>`<div class="wi${v===0?' zero':''}">${v>0?'+'+v:v}</div>`).join('')}</div></div><button class="btn step ten" data-act="stepYds" data-d="10" title="+10">+10</button></div></div>
       <div class="grp"><span class="lbl">Next play auto</span><div class="preview">${previewTxt}</div></div>
     </div>
     ${penOpen?`<div class="pen"><span class="lbl">Ball</span>
@@ -832,6 +841,8 @@ document.addEventListener('click', async e=>{
       if(f==='result' && !/^SCRAMBLE/.test(v||'')){ cur.scrType=null; cur.scrDir=null; }
       renderChart(); break; }
     case 'stepDist': cur.dist=Math.max(1,Math.min(99,(+cur.dist||0)+(+b.dataset.d))); renderChart(); break;
+    case 'clearYds': { if(!ZERO_YD_RESULTS.has(cur.result)){ cur.yds=0; cur.ydsTouched=false; renderChart(); toast('Yards cleared — set the gain'); } break; }
+    case 'stepYl': { const t0=trueYL(cur.side,cur.yl); setTrue(t0==null? 25 : Math.max(1,Math.min(99,t0+(+b.dataset.d)))); renderChart(); break; }
     case 'stepYds': if(!ZERO_YD_RESULTS.has(cur.result)){ cur.yds=Math.max(-50,Math.min(99,(+cur.yds||0)+(+b.dataset.d))); cur.ydsTouched=true; renderChart(); } break;
     case 'concept': { const v=b.dataset.v; cur.concept = cur.concept.toUpperCase()===v.toUpperCase()? '' : v; renderChart(); break; }
     case 'conceptAdd': { const v=await askText('New '+(cur.type==='RPO'?'RPO':cBucket(cur.type)||'')+' concept:'); if(!v||!v.trim()) return; const o=opp(); addConcept(o, cur.type==='RPO'?null:cBucket(cur.type), v.trim()); cur.concept=v.trim(); save(); renderChart(); break; }
@@ -1707,10 +1718,10 @@ function renderExport(){
   </div>
   <div class="panel"><div class="ph"><b>REPORTS AS PDF</b></div><div class="note">Open Reports, pick the scope, tap SAVE PDF — the app builds the PDF itself (landscape, every table). Same button on the Play Log. Print uses the browser's own print dialog where it's allowed.</div></div>`;
 }
-const CSV_COLS=['play','snip','game','date','opponent','qtr','series','down','distance','dd_label','dd_bucket','hash','side','yard_line','to_goal','zone','personnel','backfield','backfield_sw','backfield_type','backfield_dc_term','strength','form','formation','motion','play_type','run_pass','direction','strong_weak','field_boundary','back_to','to_back','concept','players','result','scramble_type','scramble_dir','scramble_fb','scramble_sw','scramble_vs_play','fumble_recovered','yards','success','pat','pat_good','ts'];
+const CSV_COLS=['play','snip','game','date','opponent','qtr','series','down','distance','dd_label','dd_bucket','hash','side','yard_line','true_yl','to_goal','zone','personnel','backfield','backfield_sw','backfield_type','backfield_dc_term','strength','form','formation','motion','play_type','run_pass','direction','strong_weak','field_boundary','back_to','to_back','concept','players','result','scramble_type','scramble_dir','scramble_fb','scramble_sw','scramble_vs_play','fumble_recovered','yards','success','pat','pat_good','ts'];
 function csvRows(ps){
   return ps.map(p=>{ const d=p.d||derive(p); const g=S.games.find(x=>x.id===p.gameId)||{}; const o=S.opponents.find(x=>x.id===p.oppId)||{};
-    return [p.n,p.snip||'',g.label,g.date,o.name,p.qtr,p.series,p.down,p.dist,ddLabel(p),d.dd,({L:'LEFT',M:'MIDDLE',R:'RIGHT'})[p.hash]||'',p.side,p.yl,d.tg,d.zone,p.pers,p.bf,d.bfLabel,d.bfType||'',d.bfDC||'',p.str,p.form,d.formation,p.motion,p.type,d.rp,p.dir,d.sw||'',d.fb||'',d.backTo||'',d.toBack||'',p.concept,p.players.join(' '),p.result,d.scr?d.scr.type:'',d.scr?d.scr.dir:'',d.scr?d.scr.fb:'',d.scr?d.scr.sw:'',d.scr?d.scr.toPlay:'',FUMBLE_RESULTS.has(p.result)?(p.fumRec?'Y':'N'):'',p.yds,succ(p)?1:0,p.pat||'',p.pat?(p.patGood?'Y':'N'):'',new Date(p.ts).toISOString()]; });
+    return [p.n,p.snip||'',g.label,g.date,o.name,p.qtr,p.series,p.down,p.dist,ddLabel(p),d.dd,({L:'LEFT',M:'MIDDLE',R:'RIGHT'})[p.hash]||'',p.side,p.yl,trueYL(p.side,p.yl),d.tg,d.zone,p.pers,p.bf,d.bfLabel,d.bfType||'',d.bfDC||'',p.str,p.form,d.formation,p.motion,p.type,d.rp,p.dir,d.sw||'',d.fb||'',d.backTo||'',d.toBack||'',p.concept,p.players.join(' '),p.result,d.scr?d.scr.type:'',d.scr?d.scr.dir:'',d.scr?d.scr.fb:'',d.scr?d.scr.sw:'',d.scr?d.scr.toPlay:'',FUMBLE_RESULTS.has(p.result)?(p.fumRec?'Y':'N'):'',p.yds,succ(p)?1:0,p.pat||'',p.pat?(p.patGood?'Y':'N'):'',new Date(p.ts).toISOString()]; });
 }
 function toCSV(ps){ const q=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }; return [CSV_COLS.join(',')].concat(csvRows(ps).map(r=>r.map(q).join(','))).join('\r\n'); }
 let DL=null; (async()=>{ try{ if(window.claude&&claude.use) DL=await claude.use('downloads'); }catch(e){} })();
