@@ -74,6 +74,7 @@ a{color:var(--blue)}
 .wheel.snipw{width:58px;height:32px} .wheel.snipw .wi{height:32px;line-height:32px;font-size:17px;color:var(--amber);text-shadow:0 0 8px rgba(255,210,60,.5)}
 #chart .wheel.snipw,#chart .wheel.snipw .wi{height:32px;line-height:32px}
 .snipin{width:54px;height:32px;text-align:center;border-radius:4px;border:1px solid var(--line2);background:linear-gradient(180deg,#02070f,#071527);color:var(--amber);font-family:var(--mono);font-size:15px;font-weight:700;padding:0;text-shadow:0 0 8px rgba(255,210,60,.5)}
+.viewbar.warn{color:var(--amber);border-color:var(--amber);background:rgba(255,210,60,.1)}
 .viewbar{flex-basis:100%;text-align:center;font-family:var(--condensed);font-weight:700;letter-spacing:3px;font-size:13px;color:var(--ice);background:rgba(110,231,255,.08);border:1px solid rgba(110,231,255,.35);border-radius:3px;padding:2px 0;margin:-2px 0 2px}
 .ro .mini,.ro .to-btn,.ro .endgame,.ro [data-act=qtr]{pointer-events:none;opacity:.35}
 .sync{font-family:var(--mono);font-size:11px;letter-spacing:1px;padding:3px 8px;border-radius:3px;border:1px solid var(--line2);color:var(--muted)}
@@ -427,28 +428,45 @@ function load(){
 /* ============================================================ LIVE SYNC (Firebase Realtime Database, REST — no SDK)
    Charting device: every save() pushes the whole state to  <dbUrl>/tc/<room>/state.json  (debounced).
    Viewer device:   opens an SSE stream on the same path and re-renders Reports as plays land. Charting is locked. */
+const BUILD='v77';
 const SYNC_KEY='tendency_sync_v1';
 const SYNC_DEFAULTS={url:'https://tendency-reports-default-rtdb.firebaseio.com',room:'ndpios',mode:'off',secret:''};
 let SYNC = (()=>{ try{ const saved=JSON.parse(localStorage.getItem(SYNC_KEY)||'{}'); const o=Object.assign({},SYNC_DEFAULTS,saved); if(!o.url) o.url=SYNC_DEFAULTS.url; if(!o.room) o.room=SYNC_DEFAULTS.room; return o; }catch(e){ return Object.assign({},SYNC_DEFAULTS); } })();
 function saveSync(){ localStorage.setItem(SYNC_KEY, JSON.stringify(SYNC)); }
-function syncPath(){ if(!SYNC.url||!SYNC.room) return null; const base=SYNC.url.replace(/\/+$/,''); const room=SYNC.room.trim().replace(/[^a-z0-9_-]/gi,'').toLowerCase(); return `${base}/tc/${encodeURIComponent(room)}/state.json${SYNC.secret?'?auth='+encodeURIComponent(SYNC.secret):''}`; }
-let syncTimer=null, syncState={last:0,err:'',pending:false,busy:false};
+function syncPath(sub){ if(!SYNC.url||!SYNC.room) return null; const base=SYNC.url.replace(/\/+$/,''); const room=SYNC.room.trim().replace(/[^a-z0-9_-]/gi,'').toLowerCase(); return `${base}/tc/${encodeURIComponent(room)}/state${sub?'/'+sub:''}.json${SYNC.secret?'?auth='+encodeURIComponent(SYNC.secret):''}`; }
+function httpWhy(st){ return st===401||st===403? 'HTTP '+st+' — Firebase rules are blocking (set .read/.write to true)' : st===404? 'HTTP 404 — check the database URL' : 'HTTP '+st; }
+let syncTimer=null, syncState={last:0,err:'',pending:false,busy:false,checked:0,remoteBuild:''};
 function pushSync(){ if(SYNC.mode!=='chart') return; const u=syncPath(); if(!u) return; syncState.pending=true; clearTimeout(syncTimer); syncTimer=setTimeout(doPush,800); }
-async function doPush(){ const u=syncPath(); if(!u||syncState.busy) return; syncState.busy=true;
+async function doPush(){ const u=syncPath(); if(!u||SYNC.mode!=='chart') return; if(syncState.busy){ syncState.again=true; return; } syncState.busy=true; syncState.again=false;
   // The whole state travels as ONE JSON string: Firebase silently drops empty arrays/objects
   // (a new opponent with no roster, a new game with no plays), which made viewers ignore the update.
-  try{ const body=JSON.stringify({v:2,blob:JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays}),ui:{oppId:S.ui.oppId||'',gameId:S.ui.gameId||''},ts:Date.now()});
-    const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body}); if(!r.ok) throw new Error('HTTP '+r.status);
-    syncState.last=Date.now(); syncState.err=''; syncState.pending=false; }
-  catch(e){ syncState.err=String(e.message||e); setTimeout(doPush,5000); }
-  finally{ syncState.busy=false; renderSyncBadge(); } }
+  const stamp=S._dirty||0; const g=game(), o=opp();
+  const ctl=new AbortController(); const kill=setTimeout(()=>ctl.abort(),12000);   // a hung request must never block the next one
+  try{ const body=JSON.stringify({v:2,build:BUILD,n:S.plays.length,game:(o?o.name:'')+(g?' · '+g.label:''),blob:JSON.stringify({lib:S.lib,opponents:S.opponents,games:S.games,plays:S.plays}),ui:{oppId:S.ui.oppId||'',gameId:S.ui.gameId||''},ts:Date.now()});
+    const r=await fetch(u,{method:'PUT',headers:{'Content-Type':'application/json'},body,signal:ctl.signal}); if(!r.ok) throw new Error(httpWhy(r.status));
+    syncState.last=Date.now(); syncState.err=''; syncState.pending=false; syncState.sentTs=stamp; }
+  catch(e){ syncState.err= e.name==='AbortError' ? 'no answer from the cloud — retrying' : String(e.message||e); clearTimeout(syncTimer); syncTimer=setTimeout(doPush,3000); }
+  finally{ clearTimeout(kill); syncState.busy=false; if(syncState.again || (S._dirty||0)>(syncState.sentTs||0) && !syncState.err){ clearTimeout(syncTimer); syncTimer=setTimeout(doPush,300); } renderSyncBadge(); } }
+function unsentPlays(){ return syncState.sentTs==null ? 0 : S.plays.filter(p=>(p.ts||0)>(syncState.sentTs||0)).length; }
+['online','pageshow','focus'].forEach(ev=>addEventListener(ev,()=>{ if(SYNC.mode==='chart') doPush(); else if(SYNC.mode==='view') viewerKick(); }));
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible'){ if(SYNC.mode==='chart') doPush(); else if(SYNC.mode==='view') viewerKick(); } });
 let es=null, pollTimer=null;
 let lastRemoteUi='';
 function applyRemote(remote){ if(!remote) return; let st=remote;
   if(typeof remote.blob==='string'){ try{ st=JSON.parse(remote.blob); }catch(e){ syncState.err='bad data from charting device'; renderSyncBadge(); return; } }
   if(!st.lib||!st.opponents) return;
   const arr=x=>Array.isArray(x)?x:(x&&typeof x==='object'?Object.values(x):[]);
-  const ui=S.ui||{}; S={lib:st.lib,opponents:arr(st.opponents),games:arr(st.games),plays:arr(st.plays),ui};
+  if(!applyRemote.snapped){ applyRemote.snapped=true; takeSnap('before first cloud read'); }
+  // MERGE, never replace: anything on this device the cloud has never seen (a game charted offline, an
+  // opponent built here) is kept. Where the cloud knows a game, its play list is the truth for that game.
+  const ui=S.ui||{}; const rOpp=arr(st.opponents), rGames=arr(st.games), rPlays=arr(st.plays);
+  const oid=new Set(rOpp.map(o=>o.id)), gid=new Set(rGames.map(g=>g.id));
+  const hasPlays=o=>(S.plays||[]).some(p=>p.oppId===o.id); const rNames=new Set(rOpp.map(o=>o.name));
+  const keepOpp=(S.opponents||[]).filter(o=>!oid.has(o.id) && (hasPlays(o) || !rNames.has(o.name)));   // an empty starter opponent that the cloud already has by name is not worth keeping twice
+  const keepOppId=new Set(keepOpp.map(o=>o.id).concat(rOpp.map(o=>o.id)));
+  const keepGames=(S.games||[]).filter(g=>!gid.has(g.id) && keepOppId.has(g.oppId));
+  const keepPlays=(S.plays||[]).filter(p=>!gid.has(p.gameId)), pid=new Set(rPlays.map(p=>p.id));
+  S={lib:st.lib,opponents:rOpp.concat(keepOpp),games:rGames.concat(keepGames),plays:rPlays.concat(keepPlays.filter(p=>!pid.has(p.id))),ui};
   const dl=defaultState().lib; Object.keys(dl).forEach(k=>{ if(Array.isArray(dl[k])) S.lib[k]=arr(S.lib[k]); });
   try{ S.opponents.forEach(o=>{ if(!o.concepts) rebuildConcepts(o, S); }); }catch(e){}
   const ru=remote.ui?remote.ui.oppId+'|'+remote.ui.gameId:''; if(remote.ui && (ru!==lastRemoteUi || !S.opponents.find(o=>o.id===S.ui.oppId))){ S.ui.oppId=remote.ui.oppId; S.ui.gameId=remote.ui.gameId; lastRemoteUi=ru; }
@@ -457,20 +475,43 @@ function applyRemote(remote){ if(!remote) return; let st=remote;
   S.plays.forEach(p=>{ try{ p.d=derive(p); }catch(e){} });
   syncState.last=remote.ts||Date.now(); syncState.err=''; try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){}
   try{ if(view==='export') renderTop(); else render(); }catch(e){ console.error(e); syncState.err='render error: '+(e.message||e); } renderSyncBadge(); }
-function startViewer(){ stopViewer(); const u=syncPath(); if(!u) return;
-  const first=async()=>{ try{ const r=await fetch(u,{cache:'no-store'}); if(r.ok) applyRemote(await r.json()); }catch(e){ syncState.err=String(e.message||e); renderSyncBadge(); } };
-  first();
-  try{ es=new EventSource(u); es.addEventListener('put',e=>{ try{ const d=JSON.parse(e.data); if(d.path==='/') applyRemote(d.data); else first(); }catch(x){} }); es.addEventListener('patch',()=>first()); es.onerror=()=>{ syncState.err='stream dropped — retrying'; renderSyncBadge(); }; }catch(e){}
-  pollTimer=setInterval(first,15000); // belt and braces
+let viewerKick=()=>{}; let esSeen=0;
+function startViewer(){ stopViewer(); const u=syncPath(); if(!u) return; let lastTs=null; esSeen=Date.now();
+  const full=async()=>{ const r=await fetch(u,{cache:'no-store'}); if(!r.ok) throw new Error(httpWhy(r.status)); const j=await r.json();
+    if(!j){ syncState.err='nothing sent yet — set the charting iPad to CHARTING'; return; } lastTs=j.ts||null; syncState.remoteBuild=j.build||'old build'; applyRemote(j); };
+  const check=async()=>{ try{ const r=await fetch(syncPath('ts'),{cache:'no-store'}); if(!r.ok) throw new Error(httpWhy(r.status));
+      const ts=await r.json(); syncState.checked=Date.now(); if(ts==null){ syncState.err='nothing sent yet — set the charting iPad to CHARTING'; }
+      else if(ts!==lastTs){ await full(); } else if(/stream|Failed|network/i.test(syncState.err)) syncState.err=''; }
+    catch(e){ syncState.err=String(e.message||e); }
+    renderSyncBadge(); };
+  full().catch(e=>{ syncState.err=String(e.message||e); renderSyncBadge(); });
+  viewerKick=()=>{ check(); if(Date.now()-esSeen>45000){ try{ es&&es.close(); }catch(e){} openStream(); } };
+  const openStream=()=>{ esSeen=Date.now(); try{ es=new EventSource(u); es.addEventListener('put',e=>{ try{ esSeen=Date.now(); const d=JSON.parse(e.data); syncState.checked=Date.now(); if(d.path==='/'&&d.data){ lastTs=d.data.ts||null; syncState.remoteBuild=d.data.build||'old build'; applyRemote(d.data); } else check(); }catch(x){} });
+    es.addEventListener('patch',()=>check()); es.addEventListener('keep-alive',()=>{ esSeen=Date.now(); syncState.checked=Date.now(); renderSyncBadge(); });
+    es.addEventListener('cancel',()=>{ syncState.err='Firebase rules denied read access'; renderSyncBadge(); });
+    es.onmessage=()=>{ esSeen=Date.now(); }; es.onopen=()=>{ esSeen=Date.now(); }; es.onerror=()=>{ /* the 5-second check below keeps the viewer current while the stream reconnects */ }; }catch(e){} };
+  openStream();
+  pollTimer=setInterval(()=>{ check(); if(Date.now()-esSeen>45000){ try{ es&&es.close(); }catch(e){} openStream(); } },5000);
 }
 function stopViewer(){ if(es){ es.close(); es=null; } if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
 function ago(t){ if(!t) return '—'; const s=Math.max(0,Math.round((Date.now()-t)/1000)); return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s'; }
 function renderSyncBadge(){ const el=document.getElementById('syncBadge'); if(!el) return;
   if(SYNC.mode==='off'||!syncPath()){ el.className='hidden'; return; }
   el.className='sync '+(syncState.err?'bad':(SYNC.mode==='view'?'view':'ok'));
-  el.innerHTML = SYNC.mode==='view' ? `VIEWER · updated ${ago(syncState.last)} ago${syncState.err?' · '+esc(syncState.err):''}` : `LIVE${syncState.pending?' · sending…':' · synced '+ago(syncState.last)+' ago'}${syncState.err?' · '+esc(syncState.err):''}`; }
-setInterval(renderSyncBadge,1000);
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){ toast('Storage full or blocked — export a backup!'); } pushSync(); }
+  el.innerHTML = SYNC.mode==='view' ? `VIEWER ${BUILD} · last update ${ago(syncState.last)} ago · checked ${ago(syncState.checked)} ago${syncState.remoteBuild&&syncState.remoteBuild!==BUILD?' · CHARTING iPad on '+esc(syncState.remoteBuild)+' — update it':''}${syncState.err?' · '+esc(syncState.err):''}` : `LIVE ${BUILD}${unsentPlays()>0?' · '+unsentPlays()+' unsent':''}${syncState.pending?' · sending…':' · synced '+ago(syncState.last)+' ago'}${syncState.err?' · '+esc(syncState.err):''}`; }
+setInterval(()=>{ renderSyncBadge(); if(SYNC.mode==='chart'){ const want=(syncState.err||unsentPlays()>0)&&(Date.now()-(S._dirty||0))>6000, has=!!document.querySelector('.viewbar.warn'); if(want!==has) renderTop(); } },1000);
+/* SAFETY COPIES — a game can never be lost by a mode switch, a bad import or a cloud read.
+   Every change is kept in the main store; on top of that the app keeps timed snapshots on this device
+   and takes one before anything that replaces data. Settings → SAFETY COPIES restores any of them. */
+const SNAP_KEY='tendency_snaps_v1'; let lastAutoSnap=0;
+function snaps(){ try{ return JSON.parse(localStorage.getItem(SNAP_KEY)||'[]'); }catch(e){ return []; } }
+function takeSnap(why){ try{ const list=snaps(); const st=JSON.stringify(S); const plays=S.plays.length;
+    if(list.length && list[0].state===st) { list[0].why=why; list[0].ts=Date.now(); }
+    else list.unshift({ts:Date.now(), why, plays, state:st});
+    while(list.length>6) list.pop();
+    try{ localStorage.setItem(SNAP_KEY, JSON.stringify(list)); }catch(e){ list.splice(3); localStorage.setItem(SNAP_KEY, JSON.stringify(list)); } }catch(e){} }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); S._dirty=Date.now(); }catch(e){ toast('Storage full or blocked — export a backup!'); }
+  if(Date.now()-lastAutoSnap>120000){ lastAutoSnap=Date.now(); takeSnap('auto'); } pushSync(); }
 
 let S = load();
 let view = (JSON.parse(localStorage.getItem('tendency_sync_v1')||'{}').mode==='view') ? 'reports' : 'chart';
@@ -580,6 +621,10 @@ function computeNext(e){
 }
 
 /* ---------- opponent board ---------- */
+/* FIXED PERSONNEL — an offense that lives in one grouping. o.fixedPers holds it ('11'); the Chart page then
+   stamps it on every play and hides the personnel buttons. Set by a scout import that lists no (or one) personnel
+   group, or by the ONE GROUPING button on the Opponents page. */
+function fixedPers(o){ o=o||opp(); return o&&o.fixedPers?o.fixedPers:null; }
 function board(cat){ const o=opp(); if(!o) return []; return (o[cat]||[]).filter(x=>S.lib[cat].includes(x)); }
 
 /* ============================================================ RENDER */
@@ -593,7 +638,7 @@ function renderTop(){
   const tos=(team)=>{ const t=g.to[team]; let h=''; for(let hh=0;hh<2;hh++){ for(let i=0;i<3;i++) h+=`<i class="${i<t[hh]?'on':''}"></i>`; if(hh===0) h+='<i class="gap"></i>'; } return h; };
   const RO=SYNC.mode==='view';
   document.getElementById('top').innerHTML = `
-    ${RO?`<div class="viewbar">VIEWER · READ ONLY · mirrors the charting iPad</div>`:''}
+    ${RO?`<div class="viewbar">VIEWER · READ ONLY · mirrors the charting iPad</div>`:(SYNC.mode==='chart'&&(syncState.err||unsentPlays()>0)&&(Date.now()-(S._dirty||0))>6000)?`<div class="viewbar warn">CLOUD BEHIND · ${unsentPlays()} play${unsentPlays()===1?'':'s'} not yet on the viewer${syncState.err?' · '+esc(syncState.err):''}</div>`:''}
     <div class="brand"><span class="nd">ND</span> PIOS DEFENSE <span class="sub">TENDENCY CHART</span></div><span id="syncBadge" class="hidden" style="margin-left:6px"></span>
     <select class="sel" data-act="pickOpp" aria-label="Opponent">${S.opponents.map(x=>`<option value="${x.id}" ${x.id===S.ui.oppId?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
     <select class="sel" data-act="pickGame" aria-label="Game">${S.games.filter(x=>x.oppId===S.ui.oppId).map(x=>`<option value="${x.id}" ${x.id===S.ui.gameId?'selected':''}>${esc(x.label)} · ${x.date}${x.ended?' · FINAL':''}</option>`).join('')}${SYNC.mode==='view'?'':'<option value="__new">+ New game…</option>'}</select>
@@ -711,7 +756,8 @@ function chartHTML(){
   const g=game(), o=opp();
   if(!g||!o){ return `<div class="panel"><b>No opponent/game.</b> Go to Opponents to create one.</div>`; }
   // amber = still needs a decision for this play
-  const P={ hash:!cur.hash, yds:!cur.ydsTouched&&!ZERO_YD_RESULTS.has(cur.result)&&!/TD$/.test(cur.result||''), bf:!cur.bf, form:!cur.form, pers:!cur.pers, str:!cur.str,
+  if(fixedPers(o)) cur.pers=fixedPers(o);
+  const P={ hash:!cur.hash, yds:!cur.ydsTouched&&!ZERO_YD_RESULTS.has(cur.result)&&!/TD$/.test(cur.result||''), bf:!cur.bf, form:!cur.form, pers:!cur.pers&&!fixedPers(o), str:!cur.str,
             type:!cur.type, result:!!cur.type&&!cur.result, dir:!cur.dir, player:!cur.players.length };
   const pend=k=>P[k]?' pend':'';
   const tg=toGoal(cur.side,cur.yl);
@@ -755,7 +801,7 @@ function chartHTML(){
           <div class="grp${pend('form')}"><span class="lbl">Form Family</span><div class="row">${bgrid(board('form'),'form','form')}</div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <div class="grp${pend('pers')}"><span class="lbl">Personnel</span><div class="g3">${bgrid(board('personnel'),'personnel','pers')}</div></div>
+          ${fixedPers(o)?`<div class="grp"><span class="lbl">Personnel <em>· ${esc(fixedPers(o))} every snap</em></span><div class="note" style="padding:4px 0">Auto-tagged ${esc(fixedPers(o))} · change on the Opponents page</div></div>`:`<div class="grp${pend('pers')}"><span class="lbl">Personnel</span><div class="g3">${bgrid(board('personnel'),'personnel','pers')}</div></div>`}
           <div class="grp"><span class="lbl">Motion</span><div class="g3">${bgrid(board('motion'),'motion','motion')}</div></div>
           <div class="grp${pend('str')}"><span class="lbl">Strength <em>${cur.str||''}</em></span><div class="g3">${['LEFT','BALANCED','RIGHT'].map(s=>`<button class="btn ${cur.str===s?'on':''}" data-act="set" data-f="str" data-v="${s}">${s==='BALANCED'?'BAL':s}</button>`).join('')}</div></div>
         </div>
@@ -841,6 +887,11 @@ document.addEventListener('click', async e=>{
       if(f==='result' && !/^SCRAMBLE/.test(v||'')){ cur.scrType=null; cur.scrDir=null; }
       renderChart(); break; }
     case 'stepDist': cur.dist=Math.max(1,Math.min(99,(+cur.dist||0)+(+b.dataset.d))); renderChart(); break;
+    case 'restoreSnap': { const sn=snaps()[+b.dataset.i]; if(!sn) break; if(!await askConfirm(`Restore the safety copy from ${new Date(sn.ts).toLocaleString()} (${sn.plays} plays)? Current data is kept as a safety copy first.`,'RESTORE')) break;
+      takeSnap('before restore'); try{ const st=JSON.parse(sn.state); localStorage.setItem(KEY, JSON.stringify(st)); S=load(); S._dirty=Date.now(); save(); toast('Restored — '+S.plays.length+' plays'); render(); }catch(e){ toast('Could not read that copy'); } break; }
+    case 'snapNow': takeSnap('manual'); toast('Safety copy saved'); render(); break;
+    case 'fixedPers': { const o=opp(); if(o.fixedPers){ delete o.fixedPers; save(); render(); toast('Personnel is picked per play again'); break; }
+      const v=await askText('This offense runs one personnel grouping every snap. Which?', o.personnel[0]||'11'); if(!v) return; const vv=addToLib('personnel',v); if(!vv) return; if(!o.personnel.includes(vv)) o.personnel.push(vv); o.fixedPers=vv; save(); render(); toast('Every play will be tagged '+vv); break; }
     case 'clearYds': { if(!ZERO_YD_RESULTS.has(cur.result)){ cur.yds=0; cur.ydsTouched=false; renderChart(); toast('Yards cleared — set the gain'); } break; }
     case 'stepYl': { const t0=trueYL(cur.side,cur.yl); setTrue(t0==null? 25 : Math.max(1,Math.min(99,t0+(+b.dataset.d)))); renderChart(); break; }
     case 'stepYds': if(!ZERO_YD_RESULTS.has(cur.result)){ cur.yds=Math.max(-50,Math.min(99,(+cur.yds||0)+(+b.dataset.d))); cur.ydsTouched=true; renderChart(); } break;
@@ -901,10 +952,17 @@ document.addEventListener('click', async e=>{
     case 'conceptDel': { const o=opp(); const c=oppConcepts(o); c[b.dataset.b]=c[b.dataset.b].filter(x=>x!==b.dataset.v); save(); render(); break; }
     case 'conceptAddList': { const inp=document.getElementById('cn_'+b.dataset.b); const v=(inp.value||'').trim(); if(!v) return; addConcept(opp(), b.dataset.b, v); save(); render(); break; }
     case 'conceptsRebuild': { rebuildConcepts(opp()); save(); render(); toast('Concept lists rebuilt from logged plays'); break; }
-    case 'syncMode': { SYNC.url=(document.getElementById('syncUrl').value||'').trim(); SYNC.room=(document.getElementById('syncRoom').value||'').trim(); SYNC.secret=(document.getElementById('syncSecret').value||'').trim(); SYNC.mode=b.dataset.v; saveSync(); stopViewer();
+    case 'syncMode': { const to=b.dataset.v; if(to===SYNC.mode) break;
+      if(SYNC.mode==='chart' && to!=='chart'){ const unsent=(S._dirty||0)>(syncState.sentTs||0) || syncState.pending || !!syncState.err;
+        if(unsent && !(await askConfirm('This iPad has plays the cloud has NOT confirmed receiving (no connection, or rules blocking). They stay saved on this device and a safety copy is being kept, but the viewer will not show them until this iPad is back on CHARTING with a connection.\n\nSwitch anyway?','SWITCH'))) break; }
+      takeSnap('before switching to '+to.toUpperCase());
+      SYNC.url=(document.getElementById('syncUrl').value||'').trim(); SYNC.room=(document.getElementById('syncRoom').value||'').trim(); SYNC.secret=(document.getElementById('syncSecret').value||'').trim(); SYNC.mode=to; saveSync(); stopViewer();
       if(SYNC.mode==='view') startViewer(); else if(SYNC.mode==='chart'){ pushSync(); } toast('Sync: '+SYNC.mode.toUpperCase()); render(); break; }
     case 'syncTest': { SYNC.url=(document.getElementById('syncUrl').value||'').trim(); SYNC.room=(document.getElementById('syncRoom').value||'').trim(); SYNC.secret=(document.getElementById('syncSecret').value||'').trim(); saveSync(); const u=syncPath(); if(!u){ toast('Enter the database URL and a room code first'); break; }
-      try{ const r=await fetch(u,{cache:'no-store'}); if(!r.ok) throw new Error('HTTP '+r.status+(r.status===401?' — rules require auth (add the secret) or set test-mode rules':'')); const d=await r.json(); toast(d&&d.plays?`Connected · room has ${d.plays.length} plays (updated ${ago(d.ts)} ago)`:'Connected · room is empty — set the charting iPad to CHARTING'); }
+      try{ const r=await fetch(u,{cache:'no-store'}); if(!r.ok) throw new Error(httpWhy(r.status)); const d=await r.json();
+        if(!d){ toast('Connected · cloud is empty — set the charting iPad to CHARTING'); break; }
+        let n=d.n; if(n==null){ try{ n=(typeof d.blob==='string'?JSON.parse(d.blob).plays:d.plays).length; }catch(e){ n='?'; } }
+        const mine=S.plays.length; toast(`Cloud holds ${d.game?d.game+' · ':''}${n} plays · sent ${ago(d.ts)} ago from ${d.build||'an old build'}${SYNC.mode==='chart'?(n===mine?' · matches this iPad':' · THIS IPAD HAS '+mine):(n===mine?' · matches this viewer':' · THIS VIEWER SHOWS '+mine)}`); }
       catch(e){ toast('Cannot reach database: '+(e.message||e)); } break; }
     case 'endGame': if(await askConfirm(`End ${g.label}? Final: ${opp().name} ${g.score.opp} – ${opp().us||'US'} ${g.score.us}. Charting locks until reopened.`,'END GAME')){ g.ended=true; g.endedAt=Date.now(); cur=blankEntry(); storeSit(); save(); toast('Game ended — export a backup'); render(); } break;
     case 'reopenGame': g.ended=false; save(); render(); break;
@@ -921,7 +979,7 @@ document.addEventListener('click', async e=>{
     case 'csvAll': downloadCSV(S.plays.slice().sort((a,b)=>a.ts-b.ts), `tendency_all_plays.csv`); break;
     case 'jsonBackup': downloadText(JSON.stringify(S,null,1), `tendency_backup_${new Date().toISOString().slice(0,10)}.json`, 'application/json'); break;
     case 'share': shareCSV(); break;
-    case 'wipe': if(await askConfirm('Erase ALL data on this device? Export a backup first!') && await askConfirm('Really erase everything?')){ localStorage.removeItem(KEY); S=defaultState(); cur=blankEntry(); save(); render(); } break;
+    case 'wipe': takeSnap('before erase'); if(await askConfirm('Erase ALL data on this device? Export a backup first!') && await askConfirm('Really erase everything?')){ localStorage.removeItem(KEY); S=defaultState(); cur=blankEntry(); save(); render(); } break;
   }
 });
 document.addEventListener('change', async e=>{
@@ -930,8 +988,8 @@ document.addEventListener('change', async e=>{
   if(t.dataset.act==='pickGame'){ if(t.value==='__new'){ const label=await askText('Game label (e.g. "vs Michigan"):','Game '+(S.games.filter(x=>x.oppId===S.ui.oppId).length+1)); if(label){ const gm=newGame(S.ui.oppId,label.trim()); S.games.push(gm); S.ui.gameId=gm.id; cur=blankEntry(); save(); } } else { S.ui.gameId=t.value; loadSit(); save(); } render(); return; }
   if(t.dataset.act==='logGame'){ logFilter.gameId=t.value; renderLog(); return; }
   if(t.dataset.act==='snipSet'){ const g=game(); g.snipNext=Math.max(1,parseInt(t.value,10)||1); g.ackSnip=true; save(); renderTop(); return; }
-  if(t.dataset.act==='importFile'){ importJSON(t.files[0]); return; }
-  if(t.dataset.act==='importScoutFile'){ importScout(t.files[0]); t.value=''; return; }
+  if(t.dataset.act==='importFile'){ takeSnap('before backup import'); importJSON(t.files[0]); return; }
+  if(t.dataset.act==='importScoutFile'){ takeSnap('before scout import'); importScout(t.files[0]); t.value=''; return; }
   if(t.dataset.f){ const f=t.dataset.f;
     if(f==='yl'){ cur.yl = t.value===''? null : Math.max(1,Math.min(50,+t.value||1)); }
     else if(f==='dist'){ cur.dist=Math.max(1,Math.min(99,+t.value||1)); }
@@ -959,6 +1017,7 @@ function savePlay(){
   if(/^SCRAMBLE/.test(cur.result) && (!cur.scrType||!cur.scrDir)){ toast('Scramble: pick CLIMB / ESCAPE and which way he went'); return; }
   if(cur.yl==null){ toast('Enter the yard line (Ball on)'); document.getElementById('yl').focus(); return; }
   if(cur.type==='RPO' && !cur.result){ toast('Pick a result'); return; }
+  if(fixedPers()) cur.pers=fixedPers();
   const rec = Object.assign({}, cur, { yds: ZERO_YD_RESULTS.has(cur.result)?0:(+cur.yds||0), players:[...cur.players], concept:(cur.concept||'').trim() });
   rec.d = derive(rec);
   if(rec.concept){ const b=rec.d.rp==='RUN'?'RUN':rec.d.rp==='PASS'?'PASS':null; addConcept(opp(), b, rec.concept); }
@@ -1665,7 +1724,7 @@ function renderOpponents(){
   </div>
   ${o?`<div class="panel">
     <div class="ph"><b>${esc(o.name)} DASHBOARD BOARD</b><small>tap to show / hide on the Chart screen · library on the right is shared by every opponent</small></div>
-    ${CATS.map(([cat,label])=>`<div class="grp"><div class="ph"><span class="lbl">${label}</span><button class="sm" data-act="oppAll" data-cat="${cat}">${o[cat].length===S.lib[cat].length?'None':'All'}</button></div><div class="row">${S.lib[cat].map(v=>`<button class="check ${o[cat].includes(v)?'on':''}" data-act="oppToggle" data-cat="${cat}" data-v="${esc(v)}">${esc(v)}</button>`).join('')}</div></div>`).join('')}
+    ${CATS.map(([cat,label])=>`<div class="grp"><div class="ph"><span class="lbl">${label}</span><button class="sm" data-act="oppAll" data-cat="${cat}">${o[cat].length===S.lib[cat].length?'None':'All'}</button>${cat==='personnel'?`<button class="sm ${o.fixedPers?'on':''}" style="margin-left:6px;${o.fixedPers?'border-color:var(--amber);color:var(--amber)':''}" data-act="fixedPers">${o.fixedPers?'ONE GROUPING · '+esc(o.fixedPers)+' · tap to turn off':'ONE GROUPING EVERY SNAP…'}</button>`:''}</div><div class="row">${S.lib[cat].map(v=>`<button class="check ${o[cat].includes(v)?'on':''}" data-act="oppToggle" data-cat="${cat}" data-v="${esc(v)}">${esc(v)}</button>`).join('')}</div></div>`).join('')}
   </div>`:''}
   <div class="panel">
     <div class="ph"><b>MASTER LIBRARY</b><small>renaming updates every logged play · order here = button order on the dashboard</small></div>
@@ -1702,7 +1761,11 @@ function renderExport(){
     </div>
   </div>`}
   <div class="panel">
-    <div class="ph"><b>LIVE SYNC</b><small>chart on one iPad · view updating reports on any other device</small></div>
+    <div class="ph"><b>SAFETY COPIES</b><small>kept on this device · automatic every 2 minutes of charting and before any mode switch, import, restore or erase</small><button class="sm" style="margin-left:auto" data-act="snapNow">SAVE ONE NOW</button></div>
+    <div class="list">${snaps().map((sn,i)=>`<div class="item"><span class="t">${new Date(sn.ts).toLocaleString([], {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})} <span class="note">· ${sn.plays} plays · ${esc(sn.why)}</span></span><button class="btn" style="font-size:14px" data-act="restoreSnap" data-i="${i}">RESTORE</button></div>`).join('')||'<div class="note">No safety copies yet — one is taken automatically as you chart.</div>'}</div>
+  </div>
+  <div class="panel">
+    <div class="ph"><b>LIVE SYNC</b><small>BUILD ${BUILD} · chart on one iPad · view updating reports on any other device</small></div>
     <div class="form-row">
       <div class="grp"><span class="lbl">Firebase database URL</span><input class="txt" id="syncUrl" placeholder="https://your-project-default-rtdb.firebaseio.com" value="${esc(SYNC.url)}"></div>
       <div class="grp"><span class="lbl">Room code <span>(same on every device)</span></span><input class="txt" id="syncRoom" placeholder="e.g. ndpios" value="${esc(SYNC.room)}"></div>
@@ -1712,7 +1775,7 @@ function renderExport(){
       <button class="btn ${SYNC.mode==='off'?'on':''}" data-act="syncMode" data-v="off">OFF</button>
       <button class="btn ${SYNC.mode==='chart'?'on':''}" data-act="syncMode" data-v="chart">CHARTING (sends)</button>
       <button class="btn ${SYNC.mode==='view'?'on':''}" data-act="syncMode" data-v="view">VIEWER (reads only)</button>
-      <button class="btn ok on" data-act="syncTest">TEST CONNECTION</button>
+      <button class="btn ok on" data-act="syncTest">CHECK CLOUD</button>
     </div>
     <div class="note" id="syncNote">${SYNC.mode==='chart'?'Every saved play is pushed to the cloud within a second. Works offline — it catches up when the connection returns.':SYNC.mode==='view'?'This device mirrors the charting iPad. Reports and the Play Log refresh as plays come in. Charting is locked here.':'Setup: Firebase console → create project → Realtime Database → start in test mode → copy the database URL above. Pick a room code, set the charting iPad to CHARTING and every other device to VIEWER.'}</div>
   </div>
@@ -1807,6 +1870,7 @@ function importProfile(j){
   const o=ensureOpp(j.opponent||(opp()&&opp().name)||'OPPONENT');
   if(j.us) o.us=U(j.us);
   CATS.forEach(([cat])=>{ (j[cat]||[]).forEach(v=>{ const vv=addToLib(cat,v); if(vv&&!o[cat].includes(vv)) o[cat].push(vv); }); });
+  { const pl=(j.personnel||[]).map(x=>String(x).trim()).filter(Boolean); if(pl.length<=1){ o.fixedPers=addToLib('personnel',pl[0]||'11')||'11'; if(!o.personnel.includes(o.fixedPers)) o.personnel.push(o.fixedPers); } else delete o.fixedPers; }
   (j.roster||[]).forEach(r=>{ const num=String(r.num||r.jersey||r['#']||'').trim(); if(!num) return; const ex=o.roster.find(x=>x.num===num); const rec={num,pos:U(r.pos||r.position||''),name:r.name||''}; if(ex) Object.assign(ex,rec); else o.roster.push(rec); });
   const cj=j.concepts||{}; const runC=j.run_concepts||cj.run||cj.RUN||[], passC=j.pass_concepts||cj.pass||cj.PASS||[]; const flat=Array.isArray(j.concepts)?j.concepts:[];
   runC.forEach(c=>addConcept(o,'RUN',c)); passC.forEach(c=>addConcept(o,'PASS',c)); flat.forEach(c=>addConcept(o,null,c));
@@ -1846,7 +1910,7 @@ function importRows(headers, rows, o){
     const e=blankEntry();
     e.hash=mapHash(g('hash',r)); e.down=down; e.dist=parseInt(g('dist',r),10)||10;
     if(pos){ e.side=pos.side; e.yl=pos.yl; } else { e.side='OWN'; e.yl=null; }
-    e.pers=addToLib('personnel',g('pers',r))||null; e.bf=addToLib('backfield',g('bf',r))||null; e.form=addToLib('form',g('form',r))||null;
+    e.pers=addToLib('personnel',g('pers',r))||fixedPers(o)||null; e.bf=addToLib('backfield',g('bf',r))||null; e.form=addToLib('form',g('form',r))||null;
     e.motion=addToLib('motion',g('motion',r))||'NONE'; e.str=mapStr(g('str',r)); e.type=type; e.dir=mapDir(g('dir',r));
     const td=/^(Y|YES|1|TRUE|TD)$/.test(U(g('td',r)));
     e.result=mapResult(type,g('result',r),yds,td); e.yds=ZERO_YD_RESULTS.has(e.result)?0:yds;
