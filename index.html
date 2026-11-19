@@ -111,6 +111,7 @@ a{color:var(--blue)}
 .btn.need{border-color:var(--amber);animation:pulse 1.2s infinite}
 .btn.on{background:linear-gradient(180deg,rgba(255,30,60,.9),rgba(160,8,36,.95));color:#fff;border-color:#ff8a9a;box-shadow:0 0 16px rgba(255,30,60,.65),inset 0 0 14px rgba(255,255,255,.18);text-shadow:0 0 8px rgba(255,255,255,.7)}
 .btn.ok.on{background:linear-gradient(180deg,rgba(31,143,85,.9),rgba(16,90,52,.95));color:#fff;border-color:#5dffa8;box-shadow:0 0 16px rgba(93,255,168,.45),inset 0 0 14px rgba(255,255,255,.15)}
+.btn.more{border-style:dashed;color:var(--ice);font-size:12px;letter-spacing:1px}
 .btn.add{width:40px;padding:0;border-style:dashed;background:transparent;color:var(--muted);font-size:18px}
 .btn.big{height:44px;font-size:19px}
 .btn.step{width:40px;padding:0;font-size:20px;font-family:var(--sans);font-weight:500}
@@ -428,7 +429,7 @@ function load(){
 /* ============================================================ LIVE SYNC (Firebase Realtime Database, REST — no SDK)
    Charting device: every save() pushes the whole state to  <dbUrl>/tc/<room>/state.json  (debounced).
    Viewer device:   opens an SSE stream on the same path and re-renders Reports as plays land. Charting is locked. */
-const BUILD='v77';
+const BUILD='v78';
 const SYNC_KEY='tendency_sync_v1';
 const SYNC_DEFAULTS={url:'https://tendency-reports-default-rtdb.firebaseio.com',room:'ndpios',mode:'off',secret:''};
 let SYNC = (()=>{ try{ const saved=JSON.parse(localStorage.getItem(SYNC_KEY)||'{}'); const o=Object.assign({},SYNC_DEFAULTS,saved); if(!o.url) o.url=SYNC_DEFAULTS.url; if(!o.room) o.room=SYNC_DEFAULTS.room; return o; }catch(e){ return Object.assign({},SYNC_DEFAULTS); } })();
@@ -653,7 +654,27 @@ function renderTop(){
 `;
 }
 
-function bgrid(items,cat,field,cls){ // button list for a category
+/* RANKED BOARDS — every pick list on the Chart page shows at most TOP_N buttons so the page always fits.
+   Before the first snap the list is alphabetical; as plays are logged it re-orders by times used THIS GAME
+   (most used first, ties alphabetical). Everything past the cut-off sits behind a MORE button, and whatever
+   is currently selected is always visible even if it fell outside the top group. */
+const TOP_N=8;
+function gamePlays(){ const g=game(); return g? S.plays.filter(p=>p.gameId===g.id) : []; }
+function rankItems(items, countOf){ const c={}; items.forEach(x=>c[x]=0); countOf(c);
+  return items.slice().sort((a,b)=>(c[b]||0)-(c[a]||0) || String(a).localeCompare(String(b),undefined,{numeric:true})); }
+function rankedBoard(cat, field){ return rankItems(board(cat), c=>gamePlays().forEach(p=>{ const v=p[field]; if(v in c) c[v]++; })); }
+function capList(items, selected){ selected=(selected||[]).filter(Boolean); if(items.length<=TOP_N) return {shown:items, hidden:[]};
+  let shown=items.slice(0,TOP_N); const hidden=items.slice(TOP_N);
+  selected.forEach(v=>{ if(items.includes(v)&&!shown.includes(v)){ const drop=[...shown].reverse().find(x=>!selected.includes(x)); if(drop) shown[shown.indexOf(drop)]=v; } });
+  return {shown, hidden:items.filter(x=>!shown.includes(x)).sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}))}; }
+function moreBtn(kind, n, extra){ return n? `<button class="btn more" data-act="more" data-kind="${kind}" ${extra||''}>MORE · ${n}</button>` : ''; }
+function bgrid(items,cat,field,cls){ // button list for a category — ranked + capped
+  const r=capList(items,[cur[field]]); items=r.shown;
+  return items.map(x=>`<button class="btn ${cls||''} ${cur[field]===x?'on':''}" data-act="set" data-f="${field}" data-v="${esc(x)}">${esc(x)}</button>`).join('')
+    + moreBtn(cat, r.hidden.length, `data-f="${field}"`)
+    + (cat?`<button class="btn add" data-act="addToBoard" data-cat="${cat}" aria-label="Add from library">+</button>`:'');
+}
+function bgrid_old(items,cat,field,cls){ // button list for a category
   const sel = cur[field];
   return items.map(x=>`<button class="btn ${cls||''} ${sel===x?'on':''}" data-act="set" data-f="${field}" data-v="${esc(x)}">${esc(x)}</button>`).join('')
     + (cat?`<button class="btn add" data-act="addToBoard" data-cat="${cat}" aria-label="Add from library">+</button>`:'');
@@ -797,12 +818,12 @@ function chartHTML(){
       <div class="ph"><b>ALIGNMENT</b><small>${esc(o.name)} board · + pulls from library</small></div>
       <div class="align">
         <div style="display:flex;flex-direction:column;gap:8px">
-          <div class="grp${pend('bf')}"><span class="lbl">Backfield <span>(as aligned)</span></span><div class="row">${bgrid(board('backfield'),'backfield','bf')}</div></div>
-          <div class="grp${pend('form')}"><span class="lbl">Form Family</span><div class="row">${bgrid(board('form'),'form','form')}</div></div>
+          <div class="grp${pend('bf')}"><span class="lbl">Backfield <span>(as aligned)</span></span><div class="row">${bgrid(rankedBoard('backfield','bf'),'backfield','bf')}</div></div>
+          <div class="grp${pend('form')}"><span class="lbl">Form Family</span><div class="row">${bgrid(rankedBoard('form','form'),'form','form')}</div></div>
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          ${fixedPers(o)?`<div class="grp"><span class="lbl">Personnel <em>· ${esc(fixedPers(o))} every snap</em></span><div class="note" style="padding:4px 0">Auto-tagged ${esc(fixedPers(o))} · change on the Opponents page</div></div>`:`<div class="grp${pend('pers')}"><span class="lbl">Personnel</span><div class="g3">${bgrid(board('personnel'),'personnel','pers')}</div></div>`}
-          <div class="grp"><span class="lbl">Motion</span><div class="g3">${bgrid(board('motion'),'motion','motion')}</div></div>
+          ${fixedPers(o)?`<div class="grp"><span class="lbl">Personnel <em>· ${esc(fixedPers(o))} every snap</em></span><div class="note" style="padding:4px 0">Auto-tagged ${esc(fixedPers(o))} · change on the Opponents page</div></div>`:`<div class="grp${pend('pers')}"><span class="lbl">Personnel</span><div class="g3">${bgrid(rankedBoard('personnel','pers'),'personnel','pers')}</div></div>`}
+          <div class="grp"><span class="lbl">Motion</span><div class="g3">${bgrid(rankedBoard('motion','motion'),'motion','motion')}</div></div>
           <div class="grp${pend('str')}"><span class="lbl">Strength <em>${cur.str||''}</em></span><div class="g3">${['LEFT','BALANCED','RIGHT'].map(s=>`<button class="btn ${cur.str===s?'on':''}" data-act="set" data-f="str" data-v="${s}">${s==='BALANCED'?'BAL':s}</button>`).join('')}</div></div>
         </div>
       </div>
@@ -824,8 +845,8 @@ function chartHTML(){
       </div>
       <div class="g2" style="grid-template-columns:1fr 1fr">
         <div class="grp"><div class="ph"><span class="lbl">Concept</span><small>${cur.type?(cur.type==='RPO'?'run + pass':cBucket(cur.type).toLowerCase())+' concepts · tap again to clear':'pick a play type'}</small></div>
-          <div class="row">${cur.type?conceptsFor(o,cur.type).slice(0,14).map(c=>`<button class="btn ${cur.concept.toUpperCase()===c.toUpperCase()?'on':''}" style="font-size:12.5px;padding:0 7px;height:30px" data-act="concept" data-v="${esc(c)}">${esc(c)}</button>`).join('')+`<button class="btn add" style="height:30px;width:34px" data-act="conceptAdd" title="New concept">+</button>`+(cur.concept&&!conceptsFor(o,cur.type).some(c=>c.toUpperCase()===cur.concept.toUpperCase())?`<button class="btn on" style="font-size:12.5px;padding:0 7px;height:30px" data-act="concept" data-v="${esc(cur.concept)}">${esc(cur.concept)}</button>`:''):''}</div></div>
-        <div class="grp${pend('player')}"><div class="ph"><span class="lbl">Key Player</span><small>tap again to clear</small></div><div class="row">${roster.length?roster.map(p=>`<button class="btn ${cur.players.includes(p.num)?'on':''}" style="font-size:13px;padding:0 8px" data-act="player" data-v="${esc(p.num)}">#${esc(p.num)} ${esc(p.pos||'')}</button>`).join(''):`<span class="note">No roster yet — add skill players under Opponents.</span>`}</div></div>
+          <div class="row">${cur.type?(()=>{ const all=rankItems(conceptsFor(o,cur.type), c=>gamePlays().forEach(p=>{ const k=Object.keys(c).find(x=>x.toUpperCase()===(p.concept||'').toUpperCase()); if(k) c[k]++; })); const sel=all.find(c=>c.toUpperCase()===cur.concept.toUpperCase()); const r=capList(all,[sel]); return r.shown.map(c=>`<button class="btn ${cur.concept.toUpperCase()===c.toUpperCase()?'on':''}" style="font-size:12.5px;padding:0 7px;height:30px" data-act="concept" data-v="${esc(c)}">${esc(c)}</button>`).join('')+moreBtn('concept',r.hidden.length,'style="height:30px"'); })()+`<button class="btn add" style="height:30px;width:34px" data-act="conceptAdd" title="New concept">+</button>`+(cur.concept&&!conceptsFor(o,cur.type).some(c=>c.toUpperCase()===cur.concept.toUpperCase())?`<button class="btn on" style="font-size:12.5px;padding:0 7px;height:30px" data-act="concept" data-v="${esc(cur.concept)}">${esc(cur.concept)}</button>`:''):''}</div></div>
+        <div class="grp${pend('player')}"><div class="ph"><span class="lbl">Key Player</span><small>tap again to clear</small></div><div class="row">${roster.length?(()=>{ const nums=rankItems(roster.map(p=>p.num), c=>gamePlays().forEach(p=>(p.players||[]).forEach(n=>{ if(n in c) c[n]++; }))); const r=capList(nums,cur.players); const by=n=>roster.find(p=>p.num===n)||{num:n}; return r.shown.map(by).map(p=>`<button class="btn ${cur.players.includes(p.num)?'on':''}" style="font-size:13px;padding:0 8px" data-act="player" data-v="${esc(p.num)}">#${esc(p.num)} ${esc(p.pos||'')}</button>`).join('')+moreBtn('player',r.hidden.length); })():`<span class="note">No roster yet — add skill players under Opponents.</span>`}</div></div>
       </div>
     </div>
   </div>
@@ -916,6 +937,10 @@ document.addEventListener('click', async e=>{
     case 'to': { const half=g.qtr>=3?1:0; const t=g.to[b.dataset.team]; if(t[half]>0) t[half]--; else if(await askConfirm('No timeouts left this half. Reset to 3?')) t[half]=3; save(); renderTop(); break; }
     case 'qtr': g.qtr=+b.dataset.q; g.ackQtr=true; save(); renderTop(); break;
     case 'addToBoard': openAddToBoard(b.dataset.cat); break;
+    case 'more': openMore(b.dataset.kind, b.dataset.f); break;
+    case 'morePick': { const k=b.dataset.kind, v=b.dataset.v; document.getElementById('modal').className='modal hidden';
+      if(k==='concept') cur.concept=v; else if(k==='player'){ if(!cur.players.includes(v)) cur.players.push(v); } else cur[b.dataset.f]=v;
+      renderChart(); break; }
     case 'closeModal': closeModal(); break;
     case 'toggleBoardItem': { const o=opp(); const cat=b.dataset.cat, v=b.dataset.v; const i=o[cat].indexOf(v); if(i>=0) o[cat].splice(i,1); else o[cat].push(v); save(); openAddToBoard(cat); renderChart(); break; }
     case 'libAddInline': { const cat=b.dataset.cat; const inp=document.getElementById('libNew'); const v=(inp.value||'').trim().toUpperCase(); if(!v) return; if(!S.lib[cat].includes(v)) S.lib[cat].push(v); const o=opp(); if(!o[cat].includes(v)) o[cat].push(v); save(); openAddToBoard(cat); renderChart(); break; }
@@ -1091,6 +1116,18 @@ function applyPenalty(){
 function beginEdit(id){ const p=S.plays.find(x=>x.id===id); if(!p) return; if(!editId) stash=cur; editId=id; cur=Object.assign(blankEntry(), JSON.parse(JSON.stringify(p))); view='chart'; penOpen=false; render(); window.scrollTo(0,0); }
 
 /* ---------- modal: add to board ---------- */
+function openMore(kind, field){
+  const o=opp(); let items=[], label='', sel=[];
+  if(kind==='concept'){ items=conceptsFor(o,cur.type); label=cur.type+' CONCEPTS'; sel=[cur.concept]; }
+  else if(kind==='player'){ items=(o.roster||[]).map(p=>p.num); label='KEY PLAYERS'; sel=cur.players; }
+  else { items=board(kind); label=CATS.find(c=>c[0]===kind)[1].toUpperCase(); sel=[cur[field]]; }
+  const show=v=> kind==='player' ? (()=>{ const p=(o.roster||[]).find(x=>x.num===v)||{}; return '#'+esc(v)+' '+esc(p.pos||''); })() : esc(v);
+  items=items.slice().sort((a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true}));
+  const m=document.getElementById('modal'); m.className='modal';
+  m.innerHTML=`<div class="box"><div class="ph"><h3>${label} — full list (A–Z)</h3><button class="sm" data-act="closeModal">Cancel</button></div>
+    <div class="note">The dashboard shows the ${TOP_N} most-used this game. Pick anything here — it will move up as it gets used.</div>
+    <div class="row">${items.map(v=>`<button class="btn ${sel.some(x=>String(x||'').toUpperCase()===String(v).toUpperCase())?'on':''}" data-act="morePick" data-kind="${kind}" data-f="${field||''}" data-v="${esc(v)}">${show(v)}</button>`).join('')}</div></div>`;
+}
 function openAddToBoard(cat){
   const o=opp(); const label=CATS.find(c=>c[0]===cat)[1];
   document.getElementById('modal').className='modal';
