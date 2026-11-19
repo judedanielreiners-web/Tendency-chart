@@ -111,6 +111,20 @@ a{color:var(--blue)}
 .btn.need{border-color:var(--amber);animation:pulse 1.2s infinite}
 .btn.on{background:linear-gradient(180deg,rgba(255,30,60,.9),rgba(160,8,36,.95));color:#fff;border-color:#ff8a9a;box-shadow:0 0 16px rgba(255,30,60,.65),inset 0 0 14px rgba(255,255,255,.18);text-shadow:0 0 8px rgba(255,255,255,.7)}
 .btn.ok.on{background:linear-gradient(180deg,rgba(31,143,85,.9),rgba(16,90,52,.95));color:#fff;border-color:#5dffa8;box-shadow:0 0 16px rgba(93,255,168,.45),inset 0 0 14px rgba(255,255,255,.15)}
+.fv-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:6px 0 10px}
+@media (max-width:900px){.fv-grid{grid-template-columns:repeat(2,1fr)}}
+.benchchip{height:26px;padding:0 7px;min-width:26px;border-radius:4px;border:1px solid var(--ice);background:rgba(110,231,255,.08);color:var(--ice);font:700 11px var(--mono);letter-spacing:1px;cursor:pointer}.benchchip.need{border-color:var(--amber);color:var(--amber);background:rgba(255,210,60,.1)}
+.swatch{width:30px;height:30px;border-radius:50%;border:2px solid #eaf2ff;cursor:pointer;padding:0}
+.fv-break{margin-top:10px}.fv-break h4{margin:10px 0 4px}
+.fv-card{border:1px solid var(--line);border-radius:8px;padding:6px;cursor:pointer;background:rgba(255,255,255,.02)}
+.fv-card.on{border-color:var(--ice);box-shadow:0 0 0 1px var(--ice),0 0 14px rgba(110,231,255,.25)}
+.fv-name{display:flex;align-items:baseline;gap:6px;margin-top:5px;font-size:13px}.fv-name span{color:var(--muted);font-size:11px}.fv-name em{margin-left:auto;font-style:normal;color:var(--ice);font-family:var(--mono)}
+.fv-bar{display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:4px;background:#111}.fv-bar i{display:block;height:100%}
+.fv-detail{border:1px solid var(--line);border-radius:8px;padding:8px;background:rgba(255,255,255,.02)}
+.fv-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;margin-bottom:6px}.fv-head b{font-size:18px;letter-spacing:1px}.fv-head span{color:var(--muted)}.fv-head em{font-style:normal;color:var(--ice);font-family:var(--mono);margin-left:8px}
+.fv-body{display:grid;grid-template-columns:3fr 2fr;gap:10px}@media (max-width:900px){.fv-body{grid-template-columns:1fr}}
+.fv-side{display:flex;flex-direction:column;gap:6px;font-size:13px}.fv-row{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}.fv-row .lbl{min-width:150px}
+.chip{display:inline-block;border:1px solid var(--line);border-radius:4px;padding:1px 6px;font-size:12px}.chip em{font-style:normal;color:var(--ice)}
 .btn.more{border-style:dashed;color:var(--ice);font-size:12px;letter-spacing:1px}
 .btn.add{width:40px;padding:0;border-style:dashed;background:transparent;color:var(--muted);font-size:18px}
 .btn.big{height:44px;font-size:19px}
@@ -429,7 +443,7 @@ function load(){
 /* ============================================================ LIVE SYNC (Firebase Realtime Database, REST — no SDK)
    Charting device: every save() pushes the whole state to  <dbUrl>/tc/<room>/state.json  (debounced).
    Viewer device:   opens an SSE stream on the same path and re-renders Reports as plays land. Charting is locked. */
-const BUILD='v78';
+const BUILD='v94';
 const SYNC_KEY='tendency_sync_v1';
 const SYNC_DEFAULTS={url:'https://tendency-reports-default-rtdb.firebaseio.com',room:'ndpios',mode:'off',secret:''};
 let SYNC = (()=>{ try{ const saved=JSON.parse(localStorage.getItem(SYNC_KEY)||'{}'); const o=Object.assign({},SYNC_DEFAULTS,saved); if(!o.url) o.url=SYNC_DEFAULTS.url; if(!o.room) o.room=SYNC_DEFAULTS.room; return o; }catch(e){ return Object.assign({},SYNC_DEFAULTS); } })();
@@ -553,8 +567,17 @@ function runPass(e){ // charted as run or pass for tendency purposes
 }
 
 /* ---------- derived tags ---------- */
+/* NEAR / FAR HASH — the opponent's bench side. g.bench1 is the hash ('L' or 'R', as charted) nearest THEIR
+   bench in Q1. Teams change ends each quarter, so the near hash flips in Q2 and Q4 and comes back in Q3;
+   overtime follows Q1 unless overridden. g.benchQ[q] overrides a single quarter. */
+function rederiveGame(g){ S.plays.forEach(p=>{ if(p.gameId===g.id) p.d=derive(p); }); save(); }
+function nearHash(g, qtr){ if(!g||!g.bench1) return null; qtr=+qtr||1; if(g.benchQ&&g.benchQ[qtr]) return g.benchQ[qtr]; return (qtr===1||qtr===3||qtr>=5) ? g.bench1 : (g.bench1==='L'?'R':'L'); }
+function gameOf(e){ return (e.gameId&&S.games.find(x=>x.id===e.gameId))||game(); }
+function nfOf(e){ const g=gameOf(e); const nh=nearHash(g,e.qtr||(g&&g.qtr)); if(!nh||!e.hash) return null; if(e.hash==='M') return 'MID'; return e.hash===nh?'NEAR':'FAR'; }
 function derive(e){
   const d = {};
+  d.nf = nfOf(e);   // NEAR / FAR / MID hash (relative to the opponent's bench)
+  { const g=gameOf(e); const nh=nearHash(g,e.qtr||(g&&g.qtr)); d.toward = (nh&&e.dir&&e.dir!=='MIDDLE') ? ((e.dir==='LEFT')===(nh==='L') ? 'TO BENCH' : 'AWAY FROM BENCH') : null; }
   d.bfType = bfType(e.bf); d.bfDC = bfDC(e.bf);
   const L=e.str==='LEFT', R=e.str==='RIGHT';
   if(e.dir==='LEFT'||e.dir==='RIGHT'){
@@ -640,7 +663,7 @@ function renderTop(){
   const RO=SYNC.mode==='view';
   document.getElementById('top').innerHTML = `
     ${RO?`<div class="viewbar">VIEWER · READ ONLY · mirrors the charting iPad</div>`:(SYNC.mode==='chart'&&(syncState.err||unsentPlays()>0)&&(Date.now()-(S._dirty||0))>6000)?`<div class="viewbar warn">CLOUD BEHIND · ${unsentPlays()} play${unsentPlays()===1?'':'s'} not yet on the viewer${syncState.err?' · '+esc(syncState.err):''}</div>`:''}
-    <div class="brand"><span class="nd">ND</span> PIOS DEFENSE <span class="sub">TENDENCY CHART</span></div><span id="syncBadge" class="hidden" style="margin-left:6px"></span>
+    <div class="brand"><span class="nd">ND</span> PIOS DEFENSE <span class="sub">TENDENCY CHART · ${BUILD}</span></div><span id="syncBadge" class="hidden" style="margin-left:6px"></span>
     <select class="sel" data-act="pickOpp" aria-label="Opponent">${S.opponents.map(x=>`<option value="${x.id}" ${x.id===S.ui.oppId?'selected':''}>${esc(x.name)}</option>`).join('')}</select>
     <select class="sel" data-act="pickGame" aria-label="Game">${S.games.filter(x=>x.oppId===S.ui.oppId).map(x=>`<option value="${x.id}" ${x.id===S.ui.gameId?'selected':''}>${esc(x.label)} · ${x.date}${x.ended?' · FINAL':''}</option>`).join('')}${SYNC.mode==='view'?'':'<option value="__new">+ New game…</option>'}</select>
     <nav class="nav">${(SYNC.mode==='view'?[['log','Play Log'],['reports','Reports'],['export','Settings']]:[['chart','Chart'],['log','Play Log'],['reports','Reports'],['opponents','Opponents'],['export','Export']]).map(([k,l])=>`<button class="${view===k?'on':''}" data-act="view" data-v="${k}">${l}</button>`).join('')}</nav>
@@ -649,7 +672,7 @@ function renderTop(){
       <div class="vsep"></div>
       <div class="team${g.ackScore===false?' pend':''}" ${g.ackScore===false?'data-act="ackScore" title="Tap to confirm ND score"':''}><span class="nm us">${esc(o.us||'US')}</span><button class="mini" data-act="score" data-team="us" data-d="-1" aria-label="minus">−</button><span class="pts" data-act="ackScore" style="cursor:pointer">${g.score.us}</span><button class="mini" data-act="score" data-team="us" data-d="1" aria-label="plus">+</button><span class="tos" style="color:var(--accent)">${tos('us')}</span><button class="to-btn" data-act="to" data-team="us">TO</button></div>
       <div class="vsep"></div>
-      <div class="clock"><small>QTR</small><span class="qtrs${g.ackQtr===false?' pend':''}" ${g.ackQtr===false?'data-act="ackQtr" title="Tap to confirm quarter"':''} style="display:inline-flex;gap:4px">${[1,2,3,4,5].map(q=>`<button class="${g.qtr===q?'on':''}" data-act="qtr" data-q="${q}">${q===5?'OT':q}</button>`).join('')}</span><small>SER</small><span>${g.series}</span><small>PLAY</small><span style="color:var(--accent)">${gamePlays(g).length+1}</span>${g.ended?`<span class="final">FINAL</span><button class="to-btn" data-act="reopenGame">Reopen</button>`:`<button class="to-btn endgame" data-act="endGame" title="End game">END GAME</button>`}</div>
+      <div class="clock"><small>QTR</small><span class="qtrs${g.ackQtr===false?' pend':''}" ${g.ackQtr===false?'data-act="ackQtr" title="Tap to confirm quarter"':''} style="display:inline-flex;gap:4px">${[1,2,3,4,5].map(q=>`<button class="${g.qtr===q?'on':''}" data-act="qtr" data-q="${q}">${q===5?'OT':q}</button>`).join('')}</span><small>NEAR</small><button class="benchchip ${g.bench1?'':'need'}" data-act="flipBench" title="Hash on the opponent's bench side this quarter — tap to flip">${g.bench1?(nearHash(g,g.qtr)==='L'?'L':'R'):'SET'}</button><small>SER</small><span>${g.series}</span><small>PLAY</small><span style="color:var(--accent)">${gamePlays(g).length+1}</span>${g.ended?`<span class="final">FINAL</span><button class="to-btn" data-act="reopenGame">Reopen</button>`:`<button class="to-btn endgame" data-act="endGame" title="End game">END GAME</button>`}</div>
     </div>`:''}
 `;
 }
@@ -659,7 +682,6 @@ function renderTop(){
    (most used first, ties alphabetical). Everything past the cut-off sits behind a MORE button, and whatever
    is currently selected is always visible even if it fell outside the top group. */
 const TOP_N=8;
-function gamePlays(){ const g=game(); return g? S.plays.filter(p=>p.gameId===g.id) : []; }
 function rankItems(items, countOf){ const c={}; items.forEach(x=>c[x]=0); countOf(c);
   return items.slice().sort((a,b)=>(c[b]||0)-(c[a]||0) || String(a).localeCompare(String(b),undefined,{numeric:true})); }
 function rankedBoard(cat, field){ return rankItems(board(cat), c=>gamePlays().forEach(p=>{ const v=p[field]; if(v in c) c[v]++; })); }
@@ -833,7 +855,7 @@ function chartHTML(){
       <div class="ph"><b>PLAY</b><div class="row" style="gap:4px;justify-content:flex-end">${tagChips(cur).map(([t,c])=>`<span class="chip ${c}">${esc(t)}</span>`).join('')||'<small>tags appear as you tap</small>'}</div></div>
       <div class="g2">
         <div class="grp${pend('type')}"><span class="lbl">Play Type</span><div class="g4">${PLAY_TYPES.map(t=>`<button class="btn ${cur.type===t?'on':''}" data-act="set" data-f="type" data-v="${t}">${t==='SCREEN'?'SCRN':t}</button>`).join('')}</div></div>
-        <div class="grp${pend('dir')}"><span class="lbl">Direction</span><div class="g3">${['LEFT','MIDDLE','RIGHT'].map(d=>`<button class="btn ${cur.dir===d?'on':''}" data-act="set" data-f="dir" data-v="${d}">${d==='MIDDLE'?'MID':d}</button>`).join('')}</div></div>
+        <div class="grp${pend('dir')}"><span class="lbl">Direction <em>· side of the center the play attacks</em></span><div class="g2">${['LEFT','RIGHT'].map(d=>`<button class="btn ${cur.dir===d?'on':''}" data-act="set" data-f="dir" data-v="${d}">${d==='MIDDLE'?'MID':d}</button>`).join('')}</div></div>
       </div>
       <div class="grp${pend('result')}"><div class="ph"><span class="lbl">Result</span><small>${cur.type?cur.type+' options':'pick a play type'}</small></div>
         <div class="row">${results.map(r=>`<button class="btn ok ${cur.result===r?'on':''}" style="font-size:13px;padding:0 9px;flex:1 1 auto" data-act="set" data-f="result" data-v="${r}">${r.replace('COMPLETE FUMBLE','COMP FUM').replace('SACK FUMBLE','SACK FUM').replace('INTERCEPTION','INT').replace('INCOMPLETE','INCOMP').replace('COMPLETE','COMP')}</button>`).join('')}</div>
@@ -886,7 +908,8 @@ function playSummary(p){
 
 /* ---------- actions ---------- */
 let pen = {on:'DEF',yds:5,dn:'REPLAY',ball:'LIVE'};
-const VIEW_OK=new Set(['view','pickOpp','pickGame','repScope','repTab','repSub','rpFilter','downPick','goRep','pdf','print','logGame','closeModal','syncMode','syncTest','logQ','ackScore','ackQtr']);
+let nfFilter='ALL';
+const VIEW_OK=new Set(['nfFilter','reloadApp','fvPick','fvStr','view','pickOpp','pickGame','repScope','repTab','repSub','rpFilter','downPick','goRep','pdf','print','logGame','closeModal','syncMode','syncTest','logQ','ackScore','ackQtr']);
 document.addEventListener('click', async e=>{
   const b = e.target.closest('[data-act]'); if(!b) return;
   const a = b.dataset.act;
@@ -936,6 +959,8 @@ document.addEventListener('click', async e=>{
     case 'snipStep': g.snipNext=Math.max(1,Math.min(180,(+g.snipNext||1)+(+b.dataset.d))); g.ackSnip=true; save(); renderChart(); break;
     case 'to': { const half=g.qtr>=3?1:0; const t=g.to[b.dataset.team]; if(t[half]>0) t[half]--; else if(await askConfirm('No timeouts left this half. Reset to 3?')) t[half]=3; save(); renderTop(); break; }
     case 'qtr': g.qtr=+b.dataset.q; g.ackQtr=true; save(); renderTop(); break;
+    case 'setBench': { g.bench1=b.dataset.v; g.benchQ={}; save(); closeModal(); rederiveGame(g); toast('Near hash this quarter: '+(nearHash(g,g.qtr)==='L'?'LEFT':'RIGHT')); render(); break; }
+    case 'flipBench': { if(!g.bench1){ askBench(g); break; } g.benchQ=g.benchQ||{}; const cur0=nearHash(g,g.qtr); g.benchQ[g.qtr]= cur0==='L'?'R':'L'; save(); rederiveGame(g); renderTop(); toast('Near hash for this quarter set to '+(nearHash(g,g.qtr)==='L'?'LEFT':'RIGHT')); break; }
     case 'addToBoard': openAddToBoard(b.dataset.cat); break;
     case 'more': openMore(b.dataset.kind, b.dataset.f); break;
     case 'morePick': { const k=b.dataset.kind, v=b.dataset.v; document.getElementById('modal').className='modal hidden';
@@ -950,8 +975,27 @@ document.addEventListener('click', async e=>{
     case 'repScope': repScope=b.dataset.v; renderReports(); break;
     case 'repTab': repTab=b.dataset.v; renderReports(); break;
     case 'repSub': repSub[b.dataset.k]=b.dataset.t; renderReports(); break;
+    case 'reloadApp': { toast('Reloading…'); try{ if(navigator.serviceWorker){ const rs=await navigator.serviceWorker.getRegistrations(); for(const r of rs) await r.unregister(); } if(window.caches){ const ks=await caches.keys(); for(const k of ks) await caches.delete(k); } }catch(e){} location.reload(); break; }
+    case 'fedOpen': openFormEditor(b.dataset.form,b.dataset.bf,b.dataset.mode||'form'); break;
+    case 'ofBf': ofBf=b.dataset.v; keepScrollAny(()=>render()); break;
+    case 'ofStr': ofStr=b.dataset.v; keepScrollAny(()=>render()); break;
+    case 'fedClearBf': { const o=opp(); const bb=b.dataset.bf.toUpperCase(); if(!await askConfirm(`Reset ${bb} to the default backfield drawing for ${o.name}?`,'RESET')) break; if(o.bfLayouts) delete o.bfLayouts[bb]; save(); keepScrollAny(()=>render()); toast('Back to default'); break; }
+    case 'fedClear': { const o=opp(); const f=b.dataset.form.toUpperCase(), bb=b.dataset.bf.toUpperCase(); if(!await askConfirm(`Reset ${f} + ${bb} to the default drawing for ${o.name}?`,'RESET')) break;
+      if(o.layouts) delete o.layouts[f]; save(); keepScrollAny(()=>render()); toast('Back to default'); break; }
+    case 'fedColor': { if(!fed) break; const man=fedMan(fed.sel); if(!man){ toast('Tap a man first'); break; } man.color=b.dataset.v; fedDraw(); break; }
+    case 'fedReset': { if(!fed) break; const o=opp(); const f=fed.form.toUpperCase(), bb=fed.bf.toUpperCase(); const keep={l:o.layouts&&o.layouts[f],b:o.bfLayouts&&o.bfLayouts[bb],L:S.lib.layouts&&S.lib.layouts[f],B:S.lib.bfLayouts&&S.lib.bfLayouts[bb]};
+      if(fed.mode==='bf'){ if(o.bfLayouts) delete o.bfLayouts[bb]; if(S.lib.bfLayouts) delete S.lib.bfLayouts[bb]; } else { if(o.layouts) delete o.layouts[f]; if(S.lib.layouts) delete S.lib.layouts[f]; }
+      const fresh=resolveLayout(o,fed.form,fed.bf); if(fed.mode==='bf'){ fed.model.qb=fresh.qb; fed.model.backs=fresh.backs; fed.model.wild=fresh.wild; } else fed.model.skill=fresh.skill; fed.sel=null;
+      if(keep.l) (o.layouts=o.layouts||{})[f]=keep.l; if(keep.b) (o.bfLayouts=o.bfLayouts||{})[bb]=keep.b; if(keep.L) (S.lib.layouts=S.lib.layouts||{})[f]=keep.L; if(keep.B) (S.lib.bfLayouts=S.lib.bfLayouts||{})[bb]=keep.B;
+      fedDraw(); break; }
+    case 'fedAddBack': { if(!fed) break; fed.model.backs.push({side:'L',yards:1.5,depth:5.5,color:'BLUE'}); fed.sel='backs:'+(fed.model.backs.length-1); fedDraw(); break; }
+    case 'fedDrop': { if(!fed||!fed.sel||fed.sel==='qb'){ toast('Select a receiver or back'); break; } const [k,i]=fed.sel.split(':'); fed.model[k].splice(+i,1); fed.sel=null; fedDraw(); break; }
+    case 'fedSave': fedSave(b.dataset.scope); break;
+    case 'fvPick': { fvSel=b.dataset.v; keepScroll(()=>renderReports()); break; }
+    case 'fvStr': { fvStr=b.dataset.v; keepScroll(()=>renderReports()); break; }
     case 'goRep': repTab=b.dataset.tab; if(b.dataset.sub) repSub[repTab]=b.dataset.sub; renderReports(); break;
     case 'rpFilter': rpFilter=b.dataset.v; renderReports(); break;
+    case 'nfFilter': nfFilter=b.dataset.v; keepScroll(()=>renderReports()); break;
     case 'downPick': { const v=b.dataset.v==='ALL'?null:+b.dataset.v;
       if(v==null) downFilter=null;
       else if(b.dataset.one==='1') downFilter=[v];                                     // table row drill-in: focus that one down
@@ -1036,6 +1080,7 @@ function savePlay(){
   const g=game(), o=opp();
   if(SYNC.mode==='view'){ toast('Viewer mode — this device only reads. Chart on the main iPad.'); return; }
   if(g.ended){ toast('Game is ended — tap Reopen in the score bar to chart'); return; }
+  if(!g.bench1 && !gamePlays(g).length){ askBench(g); return; }
   if(!cur.hash){ toast('Pick a hash (Left / Middle / Right)'); document.querySelectorAll('[data-f=hash]').forEach(b=>b.classList.add('need')); return; }
   if(!cur.type){ toast('Pick a play type'); return; }
   if(!cur.result){ toast('Pick a result'); return; }
@@ -1187,8 +1232,8 @@ function tendTable(rows, opts={}){
   // rows: [label, plays]
   const total = rows.reduce((a,[,ps])=>a+ps.length,0);
   const chart = opts.noChart||!rows.length ? '' : `<div class="chart tchart">${opts.conceptColor? conceptSVG(rows, opts.conceptColor, true, 10) : miniSVG(miniRows(rows, Math.min(rows.length,10)), true, opts.noRP)}</div>`;
-  return chart+`<table class="tbl"><thead><tr><th>${opts.label||''}</th><th class="r">Plays</th><th class="r">%</th>${opts.noRP?'':'<th><span style="color:#ff8a9a">Run</span> / <span style="color:var(--ice)">Pass</span></th><th class="r" style="color:#ff8a9a">Run%</th><th class="r" style="color:var(--ice)">Pass%</th>'}<th class="r">Avg</th>${opts.noDir?'':'<th>L / M / R %</th>'}${opts.extra?opts.extra.map(e=>`<th>${e[0]}</th>`).join(''):''}<th class="r">Succ%</th></tr></thead><tbody>
-  ${rows.map(([k,ps])=>{ const {r,pa}=rp(ps); const n=ps.length; const dirs=split3(ps,p=>p.dir,'LEFT','MIDDLE','RIGHT');
+  return chart+`<table class="tbl"><thead><tr><th>${opts.label||''}</th><th class="r">Plays</th><th class="r">%</th>${opts.noRP?'':'<th><span style="color:#ff8a9a">Run</span> / <span style="color:var(--ice)">Pass</span></th><th class="r" style="color:#ff8a9a">Run%</th><th class="r" style="color:var(--ice)">Pass%</th>'}<th class="r">Avg</th>${opts.noDir?'':'<th>L / R %</th>'}${opts.extra?opts.extra.map(e=>`<th>${e[0]}</th>`).join(''):''}<th class="r">Succ%</th></tr></thead><tbody>
+  ${rows.map(([k,ps])=>{ const {r,pa}=rp(ps); const n=ps.length; const dirs=split2(ps.filter(p=>p.dir==='LEFT'||p.dir==='RIGHT'),p=>p.dir,'LEFT','RIGHT');
     const act=opts.rowAct?` class="click" data-act="${opts.rowAct}" data-v="${esc(opts.rowKey?opts.rowKey(k):k)}"${opts.rowOne?' data-one="1"':''}`:'';
     return `<tr${act}><td>${keyHTML(k)}${opts.rowAct?' <span class="note">›</span>':''}</td><td class="r">${n}</td><td class="r">${pct(n,total)}</td>${opts.noRP?'':`<td><span class="bar" style="width:${Math.round(60*r/Math.max(1,n))}px"></span><span class="bar p" style="width:${Math.round(60*pa/Math.max(1,n))}px"></span> ${r}/${pa}</td><td class="r" style="color:#ff6f84;text-shadow:0 0 6px rgba(255,30,60,.5)">${pct(r,r+pa)}</td><td class="r" style="color:var(--ice);text-shadow:0 0 6px rgba(110,231,255,.5)">${pct(pa,r+pa)}</td>`}<td class="r">${avg(ps.map(p=>+p.yds||0))}</td>${opts.noDir?'':`<td style="white-space:nowrap">${dirs}</td>`}${opts.extra?opts.extra.map(e=>`<td>${e[1](ps)}</td>`).join(''):''}<td class="r">${pct(ps.filter(succ).length,n)}</td></tr>`; }).join('')}
   </tbody></table>`;
@@ -1203,6 +1248,14 @@ function topList(ps,fn,n=3){ return groupBy(ps,fn).slice(0,n).map(([k,v])=>`${St
 /* ---------- presentation charts (inline SVG, no libraries) ---------- */
 const C_PASS='#0ea5e9', C_RUN='#C8102E', C_INK='#eaf2ff', C_MUTED='#8fb0dc';
 function redsRGB(t){ const m=redsScale(t).match(/\d+/g).map(Number); return [m[0]/255,m[1]/255,m[2]/255]; }
+/* HEAT BANDS — one color per band, deepening by the percent inside it:
+   0–44% white-blue → blue · 45–60% neon yellow · 61–75% neon green · 76–100% light red → hot red */
+const HEAT_BANDS=[[0,44,[236,247,255],[48,128,224]],[45,60,[255,251,190],[255,228,0]],[61,75,[190,255,200],[0,245,90]],[76,100,[255,190,190],[255,10,10]]];
+function heatRGB(v){ const pc=Math.max(0,Math.min(100,Math.round((v||0)*100))); const b=HEAT_BANDS.find(b=>pc>=b[0]&&pc<=b[1])||HEAT_BANDS[0]; const f=b[1]===b[0]?1:(pc-b[0])/(b[1]-b[0]); return b[2].map((a,i)=>Math.round(a+(b[3][i]-a)*f)); }
+function heatColor(v){ const [r,g,b]=heatRGB(v); return `rgb(${r},${g},${b})`; }
+function heatInk(v){ const [r,g,b]=heatRGB(v); const lum=(0.299*r+0.587*g+0.114*b)/255; return lum<0.55?'#ffffff':'#06203a'; }
+function heatLegendSVG(x,y,w){ let g=''; const seg=w/100; for(let pc=0;pc<=100;pc++){ g+=`<rect x="${(x+pc*seg).toFixed(1)}" y="${y}" width="${(seg+0.6).toFixed(1)}" height="10" fill="${heatColor(pc/100)}"/>`; }
+  [[0,'0'],[45,'45'],[61,'61'],[76,'76'],[100,'100%']].forEach(([pc,t])=>{ g+=`<text x="${(x+pc*seg).toFixed(1)}" y="${y+22}" font-size="9.5" fill="#8fb0dc" text-anchor="${pc===0?'start':pc===100?'end':'middle'}">${t}</text>`; }); return g; }
 function redsScale(t){ // 0..1 → Reds colormap (approx matplotlib 'Reds')
   const stops=[[12,40,72],[16,64,110],[20,92,150],[26,122,190],[34,150,225],[60,180,245],[110,215,255],[150,230,255],[200,245,255]];
   t=Math.max(0,Math.min(1,t||0)); const x=t*(stops.length-1), i=Math.floor(x), f=x-i; const a=stops[i], b=stops[Math.min(i+1,stops.length-1)];
@@ -1234,7 +1287,7 @@ function fmMatrix(title, subtitle, rows){
     return out; };
   let g='';
   cols.forEach(([lab],j)=>{ const x=padL+j*(cw+gap); const isRun=lab.startsWith('RUN'), isPass=lab.startsWith('PASS'); g+=`<text x="${x+cw/2}" y="14" text-anchor="middle" font-size="9.5" font-weight="700" letter-spacing="1" fill="${isRun?'#ff8a9a':isPass?'#8fe6ff':C_INK}">${lab==='RUN / PASS'?`<tspan fill="#ff8a9a">RUN</tspan> / <tspan fill="#8fe6ff">PASS</tspan>`:lab}</text>`; });
-  g+=`<g font-size="8.5" fill="${C_MUTED}"><text x="${padL+0*(cw+gap)+cw/2}" y="27" text-anchor="middle">red run · blue pass</text><text x="${padL+1*(cw+gap)+cw/2}" y="27" text-anchor="middle">black strong · pink weak · grey mid</text><text x="${padL+2*(cw+gap)+cw/2}" y="27" text-anchor="middle">green field · yellow bdry</text><text x="${padL+3*(cw+gap)+cw/2}" y="27" text-anchor="middle">black strong · pink weak · grey mid</text><text x="${padL+4*(cw+gap)+cw/2}" y="27" text-anchor="middle">green field · yellow bdry</text></g>`;
+  g+=`<g font-size="8.5" fill="${C_MUTED}"><text x="${padL+0*(cw+gap)+cw/2}" y="27" text-anchor="middle">red run · blue pass</text><text x="${padL+1*(cw+gap)+cw/2}" y="27" text-anchor="middle">black strong · pink weak</text><text x="${padL+2*(cw+gap)+cw/2}" y="27" text-anchor="middle">green field · yellow bdry</text><text x="${padL+3*(cw+gap)+cw/2}" y="27" text-anchor="middle">black strong · pink weak</text><text x="${padL+4*(cw+gap)+cw/2}" y="27" text-anchor="middle">green field · yellow bdry</text></g>`;
   rows.forEach((r,i)=>{
     const y=padT+i*rowH, h=rowH-7;
     if(i%2) g+=`<rect x="0" y="${y-3}" width="${W}" height="${rowH}" fill="rgba(110,231,255,.035)"/>`;
@@ -1279,18 +1332,19 @@ function splitBar(title, subtitle, rows, opts={}){
 function heatMap(title, subtitle, rowLabels, colLabels, cellFn, opts={}){
   const cells=rowLabels.map(r=>colLabels.map(c=>cellFn(r,c)));
   if(!cells.flat().some(x=>x&&x.n)) return '';
-  const vmax=Math.max(...cells.flat().filter(x=>x&&x.n).map(x=>x.v)); const vscale=(vmax>0&&vmax<0.6)?1/vmax:1;
+  const vmax=Math.max(...cells.flat().filter(x=>x&&x.n).map(x=>x.v)); const vscale=opts.relative?(vmax>0?1/vmax:1):1;   // rates are absolute; 'share' maps are scaled to their biggest cell
   const lines=colLabels.map(c=>c.includes(' · ')?c.split(' · '):[c]); const twoLine=lines.some(l=>l.length>1);
-  const longest=Math.max(...lines.flat().map(x=>x.length)); const cw=Math.max(opts.cw||96, Math.min(150, longest*6.8+10)), ch=46, padL=Math.min(240, 14+Math.max(...rowLabels.map(r=>r.length))*8.2), padT=twoLine?44:28, W=padL+colLabels.length*cw+10, H=padT+rowLabels.length*ch+6;
+  const longest=Math.max(...lines.flat().map(x=>x.length)); const cw=Math.max(opts.cw||96, Math.min(150, longest*6.8+10)), ch=46, padL=Math.min(240, 14+Math.max(...rowLabels.map(r=>r.length))*8.2), padT=twoLine?44:28, W=padL+colLabels.length*cw+10, H=34+padT+rowLabels.length*ch+6;
   let g='';
   lines.forEach((ls,j)=>{ ls.forEach((t,k)=>{ g+=`<text x="${padL+j*cw+cw/2}" y="${padT-10-(ls.length-1-k)*13}" text-anchor="middle" font-size="${twoLine?10.5:11.5}" font-weight="700" fill="${C_INK}">${esc(t)}</text>`; }); });
   rowLabels.forEach((r,i)=>{ g+=`<text x="${padL-8}" y="${padT+i*ch+ch/2+4}" text-anchor="end" font-size="12" font-weight="600" fill="${C_INK}">${esc(r)}</text>`;
     colLabels.forEach((c,j)=>{ const cell=cells[i][j]; const x=padL+j*cw, y=padT+i*ch;
       if(!cell||!cell.n){ g+=`<rect x="${x}" y="${y}" width="${cw}" height="${ch}" fill="rgba(110,231,255,.06)" stroke="#040b16" stroke-width="1.5"/><text x="${x+cw/2}" y="${y+ch/2+4}" text-anchor="middle" font-size="11" fill="#5a7aa6">—</text>`; return; }
-      const cv=Math.min(1,cell.v*vscale); const col=redsScale(cv); const dark=cv<0.55;
+      const cv=Math.min(1,cell.v*vscale); const col=heatColor(cv); const dark=heatInk(cv)==='#ffffff';
       g+=`<rect x="${x}" y="${y}" width="${cw}" height="${ch}" fill="${col}" stroke="#040b16" stroke-width="1.5"/><text x="${x+cw/2}" y="${y+ch/2+1}" text-anchor="middle" font-size="14" font-weight="700" fill="${dark?'#fff':'#06203a'}">${Math.round(cell.v*100)}%</text><text x="${x+cw/2}" y="${y+ch/2+14}" text-anchor="middle" font-size="9.5" fill="${dark?'rgba(255,255,255,.85)':'#1f4a7a'}">n=${cell.n}</text>`; }); });
+  g+=heatLegendSVG(padL, padT+rowLabels.length*ch+8, Math.min(320,colLabels.length*cw));
   const svg=`<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:${W}px;display:block" font-family="system-ui,-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">${g}</svg>`;
-  return chartCard(title, subtitle, svg, {type:'heat', rows:rowLabels, cols:colLabels, cells:cells.map(r=>r.map(c=>c?{v:c.v,n:c.n}:null))});
+  return chartCard(title, subtitle+(opts.relative?' · shaded against the busiest cell':''), svg, {type:'heat',relative:!!opts.relative, rows:rowLabels, cols:colLabels, cells:cells.map(r=>r.map(c=>c?{v:c.v,n:c.n}:null))});
 }
 /* data helpers for charts */
 function splitRows(ps, keyFn, sortByN=true){ const rows=groupBy(ps,keyFn).map(([k,v])=>{ const {r,pa}=rp(v); return {label:k, pass:pa, run:r, n:r+pa}; }); return sortByN? rows : rows.sort((a,b)=>a.label.localeCompare(b.label)); }
@@ -1409,7 +1463,7 @@ function mineKeys(gamePs, basePs){
       if(rs>=0.8||rs<=0.2){ const what=rs>=0.8?'RUN':'PASS'; const pr=rs>=0.8?rs:1-rs; keys.push({kind:'game',dim,group:k,n,score:n*(pr-0.5)*2+2, text:`${what} ${Math.round(pr*100)}% (${what==='RUN'?r:pa}/${n})`, col:what==='RUN'?'#ff8a9a':'var(--ice)'}); }
       // direction / strength / field-boundary leans
       const dirDim = dim!=='Attack' && dim!=='Hash';   // those groups are defined by direction — a direction tell would be circular
-      if(dirDim) [['dir','LEFT','left'],['dir','RIGHT','right'],['dir','MIDDLE','inside']].forEach(([f,val,lab])=>{ const x=v.filter(p=>p.dir); if(x.length>=MIN){ const sh=share(x,p=>p.dir,val); if(sh>=0.75) keys.push({kind:'game',dim,group:k,n:x.length,score:x.length*(sh-0.5)*2, text:`goes ${lab} ${Math.round(sh*100)}% (${x.filter(p=>p.dir===val).length}/${x.length})`, col:'#fff'}); } });
+      if(dirDim) [['dir','LEFT','left'],['dir','RIGHT','right']].forEach(([f,val,lab])=>{ const x=v.filter(p=>p.dir); if(x.length>=MIN){ const sh=share(x,p=>p.dir,val); if(sh>=0.75) keys.push({kind:'game',dim,group:k,n:x.length,score:x.length*(sh-0.5)*2, text:`goes ${lab} ${Math.round(sh*100)}% (${x.filter(p=>p.dir===val).length}/${x.length})`, col:'#fff'}); } });
       if(dirDim) [['sw','STRONG','to strength'],['sw','WEAK','away from strength'],['fb','FIELD','to the field'],['fb','BOUNDARY','into the boundary']].forEach(([f,val,lab])=>{ const x=v.filter(p=>p.d[f]); if(x.length>=MIN){ const sh=share(x,p=>p.d[f],val); if(sh>=0.75) keys.push({kind:'game',dim,group:k,n:x.length,score:x.length*(sh-0.5)*2, text:`${lab} ${Math.round(sh*100)}% (${x.filter(p=>p.d[f]===val).length}/${x.length})`, col:'#fff'}); } });
       // featured player / concept
       const pl=groupBy(v.flatMap(p=>p.players.slice(0,1)),x=>x)[0]; if(pl&&pl[1].length>=3&&pl[1].length/n>=0.5) keys.push({kind:'game',dim,group:k,n,score:n*(pl[1].length/n-0.3)*2, text:`ball to ${plName(pl[0])} ${Math.round(100*pl[1].length/n)}% (${pl[1].length}/${n})`, col:'var(--amber)'});
@@ -1514,7 +1568,257 @@ function sitPage(title, sub, plays, scopeN){
   <div class="subhead">By field zone</div>${tendTable(groupBy(ff,p=>p.d.zone).sort((a,b)=>ZONE_ORDER.indexOf(a[0])-ZONE_ORDER.indexOf(b[0])),{label:'Zone',extra:[TOPF,KEY_RUN,KEY_REC]})}
   <div class="subhead">Key players</div>${tg.length?tendTable(groupBy(tg,p=>plName(p._pl)),{label:'Player',noDir:true,extra:[['Share',x=>pct(x.length,ff.length)],TOPF,TOPC,TOPPC]}):'<div class="note">no key players tagged</div>'}`;
 }
-function tabHTML(tab, all){
+/* ================= FIELD VIEW — formation diagrams with tendencies drawn on the field =================
+   Same frame as the Opponent Scout canvas: NORMALIZED — ball on the left hash, BOUNDARY LEFT, FIELD RIGHT,
+   offense attacks UP. 18.75 px per yard, hashes at x=333 / 667. Skill alignments come from the opponent's
+   imported scout layouts (o.layouts[form]) when present, otherwise from the FORM_DEFAULTS below; the
+   backfield comes from BF_PRESETS by the charted backfield. Strength is drawn to whichever side the
+   offense actually set it in the plays being shown. */
+const YD=18.75, BALL_X=333, FV_W=1000, FV_H=352, LOS_Y=200;
+// skill players: side FIELD/BOUNDARY/MIDDLE, yards from the ball, depth off the LOS, label. Listed in
+// priority order — when the backfield carries two backs the LAST man is dropped to stay at eleven.
+const FORM_DEFAULTS={
+  TRIPS:   [['F',12,0,'Z'],['F',7.5,1,'H'],['F',4,1,'Y'],['B',11,0,'X'],['B',3.5,0,'U']],
+  TREY:    [['F',12,0,'Z'],['F',7,1,'H'],['F',3.5,0,'Y'],['B',11,0,'X'],['B',6,1,'S']],
+  DOUBLES: [['F',12,1,'Z'],['F',7,0,'S'],['B',11,0,'X'],['B',5,1,'H'],['F',3.5,0,'Y']],
+  SLOT:    [['F',11,1,'Z'],['F',3.5,0,'Y'],['B',11,0,'X'],['B',6,1,'H'],['F',7,1,'S']],
+  BUNCH:   [['F',6,0,'Y'],['F',4.5,1,'H'],['F',7.5,1,'Z'],['B',11,0,'X'],['B',3.5,0,'U']],
+  STACK:   [['F',10,0,'Z'],['F',10,1.5,'H'],['B',11,0,'X'],['B',5.5,1,'S'],['F',3.5,0,'Y']],
+  TIGHT:   [['F',3.5,0,'Y'],['B',3.5,0,'U'],['F',11,1,'Z'],['B',11,0,'X'],['F',5,1,'H']],
+  NUB:     [['B',3.5,0,'Y'],['F',12,0,'Z'],['F',7.5,1,'H'],['F',4.5,1,'S'],['B',6,1,'U']],
+  WING:    [['F',3.5,0,'Y'],['F',5,1,'W'],['B',11,0,'X'],['F',12,1,'Z'],['B',5,1,'H']],
+  ACE:     [['F',3.5,0,'Y'],['F',11,1,'Z'],['B',11,0,'X'],['B',6,1,'H'],['B',3.5,0,'U']],
+  PRO:     [['F',3.5,0,'Y'],['F',11,1,'Z'],['B',11,0,'X'],['B',6,1,'H'],['B',3.5,0,'U']],
+  FLEX:    [['F',7,0,'Y'],['F',12,1,'Z'],['B',11,0,'X'],['B',5,1,'H'],['B',3.5,0,'U']],
+  HEAVY:   [['F',3.5,0,'Y'],['B',3.5,0,'U'],['F',5,1,'W'],['B',11,0,'X'],['F',11,1,'Z']],
+  EMPTY:   [['F',12,0,'Z'],['F',8,1,'H'],['F',4.5,1,'Y'],['B',11,0,'X'],['B',6,1,'S']],
+  QUADS:   [['F',13,0,'Z'],['F',9.5,1,'H'],['F',6,0,'Y'],['F',3,1,'S'],['B',10,0,'X']],
+};
+const FORM_GENERIC=[['F',12,1,'Z'],['F',7,0,'S'],['B',11,0,'X'],['B',5,1,'H'],['F',3.5,0,'Y']];
+// backfield templates live in the OFFENSE'S OWN FRAME — R = the offense's right, L = left, M = behind the
+// center — exactly as charted (GUN RT = back on the right). In the normalized picture the right is the field
+// side. Whether that back is STRONG or WEAK is decided by the strength call, not by the drawing.
+const BF_PRESETS={
+  'GUN':      {qb:5,   backs:[['R',1.6,5.6,'R']]},
+  'GUN RT':   {qb:5,   backs:[['R',1.6,5.6,'R']]},
+  'GUN LF':   {qb:5,   backs:[['L',1.6,5.6,'R']]},
+  'PISTOL':   {qb:4,   backs:[['M',0,7,'R']]},
+  'PISTOL RT':{qb:4,   backs:[['R',1.6,5,'R']]},
+  'PISTOL LF':{qb:4,   backs:[['L',1.6,5,'R']]},
+  'SPLIT GUN':{qb:5,   backs:[['R',2,5.6,'R'],['L',2,5.6,'H']]},
+  'I':        {qb:0.8, backs:[['M',0,4.5,'F'],['M',0,7,'T']]},
+  'I RT':     {qb:0.8, backs:[['R',1.6,4.5,'F'],['M',0,7,'T']]},
+  'I LF':     {qb:0.8, backs:[['L',1.6,4.5,'F'],['M',0,7,'T']]},
+  'POWER I':  {qb:0.8, backs:[['M',0,4.5,'F'],['R',2,4.5,'U'],['M',0,7,'T']]},
+  'T':        {qb:0.8, backs:[['R',3,4.5,'H'],['M',0,4.5,'F'],['L',3,4.5,'T']]},
+  'WING T':   {qb:0.8, backs:[['M',0,4,'F'],['R',3,4.5,'T']]},
+  'WING T RT':{qb:0.8, backs:[['M',0,4,'F'],['R',3,4.5,'T']]},
+  'WING T LF':{qb:0.8, backs:[['M',0,4,'F'],['L',3,4.5,'T']]},
+  'UNO':      {qb:0.8, backs:[['M',0,5,'R']]},
+  'WILDCAT':  {qb:5,   backs:[['R',1.6,5.6,'R']], wild:true},
+  'EMPTY':    {qb:5,   backs:[]},
+};
+function bfPreset(bf){ bf=String(bf||'').toUpperCase(); if(BF_PRESETS[bf]) return BF_PRESETS[bf]; const base=bf.replace(/\s(RT|LF)$/,''); if(BF_PRESETS[base]) return BF_PRESETS[base]; if(/GUN/.test(bf)) return BF_PRESETS.GUN; if(/PISTOL/.test(bf)) return BF_PRESETS.PISTOL; if(/\bI\b/.test(bf)) return BF_PRESETS.I; return BF_PRESETS.GUN; }
+function formLayout(o, form){ const f=String(form||'').toUpperCase();
+  const imp=o&&o.layouts&&(o.layouts[f]||o.layouts[Object.keys(o.layouts).find(k=>k.toUpperCase()===f)]);
+  if(imp&&Array.isArray(imp.men||imp)){ const men=(imp.men||imp).filter(m=>!/QUARTERBACK|^BACK|QB/i.test(m.man||m.label||'')); if(men.length){ const r=men.map(m=>[/BOUND/i.test(m.side)?'B':/MID/i.test(m.side)?'M':'F', +m.yards||0, +m.depth||0, m.label||'']); r.imported=true; return r; } }
+  const k=Object.keys(FORM_DEFAULTS).find(k=>f===k)||Object.keys(FORM_DEFAULTS).find(k=>f.includes(k)); return k?FORM_DEFAULTS[k]:FORM_GENERIC; }
+// which side the offense set strength on, in the normalized frame
+function strSide(p){ if(!p.str||p.str==='BAL') return null; if(p.hash==='L') return p.str==='RIGHT'?'FIELD':'BOUNDARY'; if(p.hash==='R') return p.str==='LEFT'?'FIELD':'BOUNDARY'; return null; }
+function fbOf(p, dirField){ const dir=p[dirField]; if(!dir||dir==='MIDDLE') return null; if(p.hash==='L') return dir==='RIGHT'?'FIELD':'BOUNDARY'; if(p.hash==='R') return dir==='LEFT'?'FIELD':'BOUNDARY'; return null; }
+function fvCounts(ps){ const c={run:{FIELD:0,BOUNDARY:0,n:0},pass:{FIELD:0,BOUNDARY:0,n:0}}; ps.forEach(p=>{ const k=p.d.rp==='RUN'?'run':p.d.rp==='PASS'?'pass':null; if(!k) return; const fb=fbOf(p,'dir'); if(fb){ c[k].n++; c[k][fb]++; } }); return c; }
+function fvSVG(o, form, bf, ps, opts={}){
+  const mini=!!opts.mini, ed=!!opts.editor; const W=FV_W, H=mini?300:FV_H, los=mini?170:LOS_Y;
+  // strength side: majority of the plays shown; drawn to the field when unknown
+  const sf=ps.filter(p=>strSide(p)==='FIELD').length, sb=ps.filter(p=>strSide(p)==='BOUNDARY').length;
+  const strengthField = opts.strength ? opts.strength==='FIELD' : sb<=sf;
+  const X=(side,yds,abs)=>{ let s=side; if(!abs){ if(s==='F') s='S'; else if(s==='B') s='W'; } if(s==='S') s=strengthField?'F':'B'; if(s==='W') s=strengthField?'B':'F'; return s==='M'?BALL_X : s==='F'?BALL_X+yds*YD : BALL_X-yds*YD; };
+  const Y=d=>los+d*YD;
+  let g='';
+  // field
+  g+=`<rect x="0" y="0" width="${W}" height="${H}" fill="#07140d"/>`;
+  for(let y=los-10*YD; y<H+YD; y+=5*YD){ if(y<0) continue; g+=`<line x1="0" x2="${W}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#1d3b2a" stroke-width="1.5"/>`; }
+  for(let y=los-10*YD; y<H; y+=YD){ if(y<0) continue; [333,667].forEach(x=>{ g+=`<line x1="${x-7}" x2="${x+7}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#2a5a3c" stroke-width="1.5"/>`; }); }
+  g+=`<line x1="0" x2="${W}" y1="${los}" y2="${los}" stroke="#9fd3b4" stroke-width="2"/>`;
+  g+=`<rect x="0" y="0" width="3" height="${H}" fill="#ffd23c"/>`;
+  if(!mini){ g+=`<text x="12" y="${H-10}" fill="#ffd23c" font-size="13" font-family="var(--mono)" letter-spacing="2">BOUNDARY</text><text x="808" y="${H-10}" fill="#2ecc71" font-size="13" text-anchor="end" font-family="var(--mono)" letter-spacing="2">FIELD →</text>`;
+    g+=`<text x="${410}" y="${H-10}" fill="#5a7aa6" font-size="11" text-anchor="middle" font-family="var(--mono)" letter-spacing="2">NORMALIZED · BALL ON LEFT HASH · OFFENSE ATTACKS UP</text>`; }
+  // tendencies drawn on the field (run arrows red, pass arrows blue) — only on the big diagram
+  const c=fvCounts(ps);
+  const arrow=(x1,y1,x2,y2,w,col,dash)=>{ const a=Math.atan2(y2-y1,x2-x1), hl=10+w*1.2; const hx=x2-Math.cos(a)*hl, hy=y2-Math.sin(a)*hl;
+    return `<line x1="${x1}" y1="${y1}" x2="${hx.toFixed(1)}" y2="${hy.toFixed(1)}" stroke="${col}" stroke-width="${w}" stroke-linecap="round" ${dash?'stroke-dasharray="10 7"':''} opacity=".9"/><polygon points="${x2},${y2} ${(hx+Math.sin(a)*(hl*.55)).toFixed(1)},${(hy-Math.cos(a)*(hl*.55)).toFixed(1)} ${(hx-Math.sin(a)*(hl*.55)).toFixed(1)},${(hy+Math.cos(a)*(hl*.55)).toFixed(1)}" fill="${col}" opacity=".95"/>`; };
+  if(!mini&&!ed){
+    const lab=(x,y,txt,col,anchor,fs)=>`<text x="${x}" y="${y}" fill="${col}" font-size="${fs||15}" font-weight="800" text-anchor="${anchor||'middle'}" font-family="var(--mono)" style="paint-order:stroke" stroke="#07140d" stroke-width="4">${txt}</text>`;
+    const R=c.run, P=c.pass;
+    const tgt={BOUNDARY:[BALL_X-150,los-58],FIELD:[BALL_X+150,los-58]};
+    ['BOUNDARY','FIELD'].forEach(k=>{ if(R.n&&R[k]){ const sh=R[k]/R.n; const [tx,ty]=tgt[k]; g+=arrow(BALL_X,los-4,tx,ty,7,C_RUN,false); g+=lab(tx+(k==='BOUNDARY'?-6:k==='FIELD'?6:0),ty-12,`${Math.round(sh*100)}%`,'#ff8a9a',k==='BOUNDARY'?'end':k==='FIELD'?'start':'middle',20); g+=lab(tx+(k==='BOUNDARY'?-6:k==='FIELD'?6:0),ty+4,`${R[k]} run${R[k]===1?'':'s'}`,'#ff8a9a',k==='BOUNDARY'?'end':k==='FIELD'?'start':'middle',11); } });
+    // PASS — bubbles, not arrows, so they never cross the run lines: one per side, placed deep over the receivers
+    const pb={BOUNDARY:[BALL_X-215,los-118],FIELD:[BALL_X+300,los-118]};
+    ['BOUNDARY','FIELD'].forEach(k=>{ if(P.n&&P[k]){ const sh=P[k]/P.n; const [bx,by]=pb[k]; const rx=52, ry=28;
+      g+=`<ellipse cx="${bx}" cy="${by}" rx="${rx}" ry="${ry}" fill="rgba(14,165,233,.35)" stroke="${C_PASS}" stroke-width="2.5"/>`;
+      g+=`<text x="${bx}" y="${by+7}" fill="#ffffff" font-size="21" font-weight="800" text-anchor="middle" font-family="var(--mono)">${Math.round(sh*100)}%</text>`;
+      g+=`<text x="${bx}" y="${by-ry-7}" fill="#7dd3fc" font-size="11" text-anchor="middle" font-family="var(--mono)" letter-spacing="1">${k==='MID'?'MIDDLE':k} · ${P[k]} pass${P[k]===1?'':'es'}</text>`; } });
+    g+=`<text x="14" y="${H-28}" fill="#ff8a9a" font-size="12" font-family="var(--mono)" letter-spacing="2">RUN LINES · ${R.n}</text><text x="150" y="${H-28}" fill="#7dd3fc" font-size="12" font-family="var(--mono)" letter-spacing="2">PASS BUBBLES · ${P.n}</text>`;
+  }
+  // players
+  const ms=mini?1.7:1.15; const man=(x,y,label,sq,col,id)=>`<g ${id?`data-man="${id}" style="cursor:grab"`:''}>${ed&&id&&fed&&fed.sel===id?`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${15*ms}" fill="none" stroke="var(--ice)" stroke-width="2" stroke-dasharray="4 3"/>`:''}${sq?`<rect x="${(x-10*ms).toFixed(1)}" y="${(y-8*ms).toFixed(1)}" width="${20*ms}" height="${16*ms}" fill="${col||'#0b0f14'}" stroke="#eaf2ff" stroke-width="1.5"/>`:`<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${10.5*ms}" ry="${8.5*ms}" fill="${col||'#0b0f14'}" stroke="#eaf2ff" stroke-width="1.5"/>`}${label?`<text x="${x.toFixed(1)}" y="${(y+4*ms).toFixed(1)}" fill="${col==='#ffffff'||col==='#ffd23c'||col==='#f4a7b9'||col==='#2ecc71'?'#0b0f14':'#fff'}" font-size="${11*ms}" font-weight="700" text-anchor="middle" font-family="var(--mono)">${label}</text>`:''}</g>`;
+  [[-2,''],[-1,''],[0,'C'],[1,''],[2,'']].forEach(([i,l])=>{ g+=man(BALL_X+i*30,los,l,i===0); });
+  const M=opts.model||resolveLayout(o,form,bf); const colOf=c=>MAN_COLORS[c]||MAN_COLORS.WHITE;
+  if(!opts.noSkill) M.skill.forEach((m,i)=>{ g+=man(X(m.side,m.yards,true),Y(m.depth),'',false,colOf(m.color),ed&&fed&&fed.mode==='form'?'skill:'+i:null); });
+  g+=man(BALL_X,Y(M.qb.depth),M.wild?'W':'Q',false,colOf(M.qb.color),ed&&fed&&fed.mode==='bf'?'qb':null);
+  // The back is drawn where he was CHARTED. Templates are in the offense's frame (R/L); the picture is normalized
+  // to the left hash, so on left-hash plays R = field. opts.backTo (FIELD/BOUNDARY, from the plays' d.backTo) says
+  // which side the charted back actually ended up on; the template is flipped only to honor that. The GUN STRONG /
+  // GUN WEAK name is just the label the automation gives it — it never moves the back.
+  const prim=(M.backs.find(m=>m.side!=='M')||{}).side; const flipB = opts.backTo && prim ? ((prim==='R')!==(opts.backTo==='FIELD')) : false;
+  const BX=(sd,y)=>{ if(flipB) sd= sd==='R'?'L':sd==='L'?'R':sd; return sd==='M'?BALL_X : sd==='R'?BALL_X+y*YD : BALL_X-y*YD; };
+  M.backs.forEach((m,i)=>{ g+=man(BX(m.side,m.yards),Y(m.depth),'',false,colOf(m.color),ed&&fed&&fed.mode==='bf'?'backs:'+i:null); });
+  // strength tag
+  if(!mini){ const n=sf+sb; g+=`<text x="${strengthField?808:14}" y="${los+8*YD+12}" fill="#eaf2ff" font-size="12" text-anchor="${strengthField?'end':'start'}" font-family="var(--mono)" letter-spacing="2">STRENGTH ${strengthField?'→ FIELD':'→ BOUNDARY'}${n?` · ${Math.round(100*(strengthField?sf:sb)/n)}% of ${n}`:''}</text>`; }
+  const vb = mini ? `80 ${los-48} 540 ${8.4*YD+48}` : ed ? `0 ${los-60} 820 ${H-(los-60)}` : `0 0 820 ${H}`;
+  return `<svg viewBox="${vb}" width="100%" style="display:block;border:1px solid var(--line);border-radius:6px;${ed?'touch-action:none;user-select:none':''}" preserveAspectRatio="xMidYMid meet">${g}</svg>`;
+}
+/* ---------- FORMATION EDITOR ----------
+   Alignments the staff adjusts are remembered: per opponent in o.layouts[form] / o.bfLayouts[backfield],
+   or for every opponent in S.lib.layouts / S.lib.bfLayouts. Stored RELATIVE to strength (side S = strength
+   side, W = weak, M = middle) so the picture mirrors by itself when the offense sets strength to the boundary.
+   Only the Center and the Quarterback carry a letter; every other man is identified by his color. */
+const MAN_COLORS={YELLOW:'#ffd23c',BLUE:'#0ea5e9',BLACK:'#0b0f14',WHITE:'#ffffff',GREEN:'#2ecc71',ORANGE:'#ff8c1a',RED:'#C8102E',PINK:'#f4a7b9'};
+function defaultColor(label){ const l=String(label||'').toUpperCase(); if(l==='Q'||l==='W') return 'RED'; if(/^(Y|U)$/.test(l)) return 'YELLOW'; if(/^(R|T|F|H)$/.test(l)&&arguments[1]==='back') return 'BLUE'; return 'WHITE'; }
+// resolved, editable model for a form + backfield: {skill:[{side,yards,depth,color}], qb:{depth,color}, backs:[...]}
+function resolveLayout(o, form, bf){
+  const f=String(form||'').toUpperCase(), b=String(bf||'').toUpperCase();
+  const pick=(store)=>store&&(store[f]||store[Object.keys(store).find(k=>k.toUpperCase()===f)]);
+  let L=pick(o&&o.layouts)||pick(S.lib.layouts); let skill;
+  if(L&&L.rel&&Array.isArray(L.men)) skill=L.men.map(m=>({side:m.side,yards:+m.yards,depth:+m.depth,color:m.color||'WHITE'}));
+  else if(L&&Array.isArray(L.men||L)){ // imported scout drawing — absolute frame; strength = side with more men
+    const men=(L.men||L).filter(m=>!/QUARTERBACK|^BACK|QB/i.test(m.man||m.label||''));
+    const nf=men.filter(m=>/FIELD/i.test(m.side)).length, nb=men.filter(m=>/BOUND/i.test(m.side)).length; const strF=nf>=nb;
+    skill=men.map(m=>({side:/MID/i.test(m.side)?'M':(/FIELD/i.test(m.side)===strF?'S':'W'),yards:+m.yards||0,depth:+m.depth||0,color:defaultColor(m.label)})); }
+  else { const k=Object.keys(FORM_DEFAULTS).find(k=>f===k)||Object.keys(FORM_DEFAULTS).find(k=>f.includes(k)); const d=k?FORM_DEFAULTS[k]:FORM_GENERIC;
+    skill=d.map(([s,y,dp,l])=>({side:s==='F'?'S':s==='B'?'W':'M',yards:y,depth:dp,color:defaultColor(l)})); }
+  const pb=(store,name)=>store&&(store[name]||store[Object.keys(store).find(k=>k.toUpperCase()===name)]);
+  const twin=/\s(RT|LF)$/.test(b)? b.replace(/RT$/,'__').replace(/LF$/,'RT').replace(/__$/,'LF') : null;   // GUN RT ⇄ GUN LF
+  let B=pb(o&&o.bfLayouts,b)||pb(S.lib.bfLayouts,b), mirrored=false;
+  if(!B&&twin){ B=pb(o&&o.bfLayouts,twin)||pb(S.lib.bfLayouts,twin); mirrored=!!B; }
+  let qb, backs, wild=false; const flip=sd=>mirrored?(sd==='R'?'L':sd==='L'?'R':sd):sd;
+  if(B&&B.qb){ qb={depth:+B.qb.depth,color:B.qb.color||'RED'}; backs=(B.backs||[]).map(m=>({side:flip(m.side==='S'?'R':m.side==='W'?'L':m.side),yards:+m.yards,depth:+m.depth,color:m.color||'BLUE'})); wild=!!B.wild; }
+  else { const pre=bfPreset(bf); qb={depth:pre.qb,color:'RED'}; backs=pre.backs.map(([s,y,dp,l])=>({side:s,yards:y,depth:dp,color:defaultColor(l,'back')})); wild=!!pre.wild;
+    const slots=11-5-1-backs.length; if(skill.length>slots) skill=skill.slice(0,Math.max(0,slots)); }
+  return {skill,qb,backs,wild,custom:!!(L&&L.rel)||!!(B&&B.qb),customForm:!!(L&&L.rel),customBf:!!(B&&B.qb)&&!mirrored,mirroredBf:mirrored};
+}
+let fed=null; // editor state
+function openFormEditor(form, bf, mode){ mode=mode||'form';
+  const o=opp(); const m=resolveLayout(o,form,bf);
+  fed={form,bf,mode,model:JSON.parse(JSON.stringify(m)),sel:null,drag:null};
+  const box=document.getElementById('modal'); box.className='modal';
+  box.innerHTML=`<div class="box" style="width:min(900px,100%)"><div class="ph"><h3>${mode==='bf'?`EDIT BACKFIELD · ${esc(bf)} <span class="note">form shown for reference: ${esc(form)}</span>`:`EDIT FORM · ${esc(form)} <span class="note">backfield shown for reference: ${esc(bf)}</span>`}</h3><button class="sm" data-act="closeModal">Cancel</button></div>
+    <div class="note">${mode==='bf'?`Drag the QB (depth) and the backs. Left / right is the OFFENSE'S left and right, exactly as charted — ${esc(bf)} is drawn as they line up; the app decides STRONG or WEAK from the strength call on each play. Receivers are locked here.`:`Drag the receivers (snaps to ½ yard). Drawn with strength to the FIELD — it mirrors by itself when they set strength to the boundary. The backfield is locked here: edit it from its own card.`} Tap a man, then a color.</div>
+    <div id="fedSvg" style="margin:8px 0"></div>
+    <div class="row" style="align-items:center;gap:6px"><span class="lbl" style="min-width:60px">Color</span>${Object.entries(MAN_COLORS).map(([k,v])=>`<button class="swatch" data-act="fedColor" data-v="${k}" title="${k}" style="background:${v}"></button>`).join('')}<span class="note" id="fedHint" style="margin-left:8px">tap a man first</span></div>
+    <div class="row" style="margin-top:10px;gap:6px;flex-wrap:wrap"><button class="btn" data-act="fedReset">RESET TO DEFAULT</button>${mode==='bf'?`<button class="btn" data-act="fedAddBack" title="Add a back">+ BACK</button>`:''}<button class="btn" data-act="fedDrop" title="Remove the selected man">REMOVE MAN</button>
+      <span style="flex:1"></span><button class="btn ok" data-act="fedSave" data-scope="opp">SAVE FOR ${esc(o.name)}</button><button class="btn" data-act="fedSave" data-scope="all">SAVE FOR ALL OPPONENTS</button></div></div>`;
+  fedDraw(); fedWire();
+}
+function fedDraw(){ const el=document.getElementById('fedSvg'); if(!el||!fed) return; el.innerHTML=fvSVG(opp(),fed.form,fed.bf,[],{model:fed.model,editor:true}); }
+function fedWire(){ const host=document.getElementById('fedSvg'); if(!host) return;
+  const svg=()=>host.querySelector('svg');
+  const toYd=(e)=>{ const s=svg(); const pt=s.createSVGPoint(); pt.x=e.clientX; pt.y=e.clientY; const p=pt.matrixTransform(s.getScreenCTM().inverse()); return {dx:(p.x-BALL_X)/YD, dep:(p.y-LOS_Y)/YD}; };
+  host.addEventListener('pointerdown',e=>{ const g=e.target.closest('[data-man]'); if(!g) return; e.preventDefault(); const id=g.dataset.man; fed.sel=id; fed.drag=id; try{ host.setPointerCapture(e.pointerId); }catch(x){} fedDraw(); document.getElementById('fedHint').textContent=id==='qb'?'QB selected — drag changes depth':'selected — drag or pick a color'; });
+  host.addEventListener('pointermove',e=>{ if(!fed||!fed.drag) return; e.preventDefault(); const {dx,dep}=toYd(e); const man=fedMan(fed.drag); if(!man) return;
+    const snap=v=>Math.round(v*2)/2; if(fed.drag==='qb'){ man.depth=Math.max(0.5,Math.min(9,snap(dep))); }
+    else { const a=Math.abs(dx); const isBack=fed.drag.startsWith('backs'); man.side=a<0.5?'M':dx>0?(isBack?'R':'S'):(isBack?'L':'W'); man.yards=man.side==='M'?0:Math.min(26,snap(a)); man.depth=Math.max(isBack?0.5:-0.5,Math.min(10,snap(dep))); }
+    fedDraw(); });
+  const up=()=>{ if(fed) fed.drag=null; }; host.addEventListener('pointerup',up); host.addEventListener('pointercancel',up);
+}
+function fedMan(id){ if(!fed) return null; if(id==='qb') return fed.model.qb; const [k,i]=id.split(':'); return fed.model[k][+i]; }
+function fedSave(scope){ const o=opp(); const f=fed.form.toUpperCase(), b=fed.bf.toUpperCase();
+  const lay={rel:true,men:fed.model.skill.map(m=>({side:m.side,yards:m.yards,depth:m.depth,color:m.color}))};
+  const bfl={qb:{depth:fed.model.qb.depth,color:fed.model.qb.color},backs:fed.model.backs.map(m=>({side:m.side,yards:m.yards,depth:m.depth,color:m.color})),wild:!!fed.model.wild};
+  const isBf=fed.mode==='bf';
+  if(scope==='all'){ if(isBf){ (S.lib.bfLayouts=S.lib.bfLayouts||{})[b]=bfl; if(o.bfLayouts) delete o.bfLayouts[b]; } else { (S.lib.layouts=S.lib.layouts||{})[f]=lay; if(o.layouts) delete o.layouts[f]; } }
+  else { if(isBf) (o.bfLayouts=o.bfLayouts||{})[b]=bfl; else (o.layouts=o.layouts||{})[f]=lay; }
+  save(); closeModal(); fed=null; toast(scope==='all'?'Saved as the default look for every opponent':'Saved for '+o.name); keepScrollAny(()=>render()); }
+
+// re-render the reports page without jumping back to the top
+function keepScrollAny(fn){ const sc=document.querySelector('#main .scroll, .rep-body, #opponents'); const y=sc?sc.scrollTop:0, wy=window.scrollY; fn(); const sc2=document.querySelector('#main .scroll, .rep-body, #opponents'); if(sc2) sc2.scrollTop=y; window.scrollTo(0,wy); requestAnimationFrame(()=>{ const s3=document.querySelector('#main .scroll, .rep-body, #opponents'); if(s3) s3.scrollTop=y; window.scrollTo(0,wy); }); }
+function keepScroll(fn){ const sc=document.querySelector('.rep-body'); const y=sc?sc.scrollTop:0; const wy=window.scrollY; fn(); const sc2=document.querySelector('.rep-body'); if(sc2) sc2.scrollTop=y; window.scrollTo(0,wy); requestAnimationFrame(()=>{ const sc3=document.querySelector('.rep-body'); if(sc3) sc3.scrollTop=y; }); }
+/* Opponents page — every form family on the board drawn with a chosen backfield, editable before kickoff */
+let ofBf=null, ofStr='FIELD';
+function oppFormationsPanel(o){
+  const bfs=(o.backfield||[]).length?o.backfield:S.lib.backfield; if(!bfs.length||!(o.form||[]).length) return '';
+  const used=groupBy(S.plays.filter(p=>p.oppId===o.id),p=>p.bf).map(x=>x[0]); const bf=bfs.includes(ofBf)?ofBf:(used.find(b=>bfs.includes(b))||bfs[0]);
+  const strF = ofStr!=='BDRY';
+  const label=(b)=>{ const gs=/\s(RT|LF)$/.test(b)?(b.endsWith('RT')?'RIGHT':'LEFT'):null; if(!gs) return b; const strRight=strF; /* strength to the field = offense's right in the picture */ return b.replace(/\s(RT|LF)$/,'')+' '+((gs==='RIGHT')===strRight?'STRONG':'WEAK'); };
+  const cards=(o.form||[]).map(f=>{ const m=resolveLayout(o,f,bf); return `<div class="fv-card" data-act="fedOpen" data-form="${esc(f)}" data-bf="${esc(bf)}" data-mode="form">${fvSVG(o,f,bf,[],{mini:true,strength:ofStr==='BDRY'?'BOUNDARY':'FIELD'})}
+      <div class="fv-name"><b>${esc(f)}</b> <span>${esc(label(bf))}</span><em>${m.customForm?'CUSTOM':'DEFAULT'}</em></div>
+      <div class="row" style="margin-top:5px"><button class="sm" data-act="fedOpen" data-form="${esc(f)}" data-bf="${esc(bf)}">EDIT</button>${m.customForm?`<button class="sm" data-act="fedClear" data-form="${esc(f)}" data-bf="${esc(bf)}">RESET</button>`:''}</div></div>`; }).join('');
+  const bfCards=bfs.map(b=>{ const m=resolveLayout(o,o.form[0]||'DOUBLES',b); return `<div class="fv-card" data-act="fedOpen" data-form="${esc(o.form[0]||'DOUBLES')}" data-bf="${esc(b)}" data-mode="bf">${fvSVG(o,o.form[0]||'DOUBLES',b,[],{mini:true,noSkill:true})}
+      <div class="fv-name"><b>${esc(b)}</b> <span>${m.backs.length?m.backs.length+' back'+(m.backs.length>1?'s':''):'no back'} · QB ${m.qb.depth} yd</span><em>${m.customBf?'CUSTOM':m.mirroredBf?'MIRROR':'DEFAULT'}</em></div>
+      <div class="row" style="margin-top:5px"><button class="sm" data-act="fedOpen" data-form="${esc(o.form[0]||'DOUBLES')}" data-bf="${esc(b)}" data-mode="bf">EDIT</button>${m.customBf?`<button class="sm" data-act="fedClearBf" data-bf="${esc(b)}">RESET</button>`:''}</div></div>`; }).join('');
+  return `<div class="panel">
+    <div class="ph"><b>${esc(o.name)} BACKFIELDS</b><small>drawn as charted — right / left is the offense's own right and left · in the picture the right is the field side</small></div>
+    <div class="fv-grid">${bfCards}</div>
+  </div>
+  <div class="panel">
+    <div class="ph"><b>${esc(o.name)} FORMATIONS</b><small>how each look is drawn in FIELD VIEW · receivers only — the backfield comes from the cards above</small></div>
+    <div class="row" style="align-items:center;gap:4px;margin-bottom:6px;flex-wrap:wrap"><span class="lbl" style="min-width:90px">Backfield</span>${bfs.map(b=>`<button class="btn ${b===bf?'on':''}" style="font-size:12px;height:30px;padding:0 10px" data-act="ofBf" data-v="${esc(b)}">${esc(b)}</button>`).join('')}
+      <span class="lbl" style="min-width:90px;margin-left:14px">Strength</span><button class="btn ${strF?'on':''}" style="font-size:12px;height:30px;padding:0 10px" data-act="ofStr" data-v="FIELD">→ FIELD</button><button class="btn ${!strF?'on':''}" style="font-size:12px;height:30px;padding:0 10px" data-act="ofStr" data-v="BDRY">→ BOUNDARY</button><span class="note">· ${esc(bf)} with strength ${strF?'to the field':'to the boundary'} = <b style="color:var(--ice)">${esc(label(bf))}</b></span></div>
+    <div class="fv-grid">${cards}</div>
+  </div>`;
+}
+let fvSel=null, fvStr='ALL';
+function fieldViewHTML(ps, o){
+  const groups=groupBy(ps,p=>p.d.formation).slice(0,8);
+  if(!groups.length) return `<div class="note">No plays in this scope yet.</div>`;
+  if(fvSel && !groups.some(g=>g[0]===fvSel)) fvSel=null;
+  const sel=fvSel||groups[0][0]; const [bfLabel,form]=sel.split(' · ');
+  const sub=groups.find(g=>g[0]===sel)[1]; const bfNames=groupBy(sub,p=>p.bf).map(x=>x[0]); let bf=bfNames[0];
+  const sf=sub.filter(p=>strSide(p)==='FIELD'), sb=sub.filter(p=>strSide(p)==='BOUNDARY');
+  const shown = fvStr==='FIELD'?sf : fvStr==='BDRY'?sb : sub;
+  const r=shown.filter(p=>p.d.rp==='RUN').length, pa=shown.filter(p=>p.d.rp==='PASS').length, ypp=shown.length?(shown.reduce((a,p)=>a+(+p.yds||0),0)/shown.length).toFixed(1):'—';
+  const cards=groups.map(([k,v])=>{ const [b,f]=k.split(' · '); const rr=v.filter(p=>p.d.rp==='RUN').length, pp=v.filter(p=>p.d.rp==='PASS').length;
+    const cb=groupBy(v,p=>p.bf)[0][0]; const btF=v.filter(p=>p.d.backTo==='FIELD').length, btB=v.filter(p=>p.d.backTo==='BOUNDARY').length;
+    return `<div class="fv-card ${k===sel?'on':''}" data-act="fvPick" data-v="${esc(k)}">${fvSVG(o,f,cb,v,{mini:true, backTo:(btF||btB)?(btF>=btB?'FIELD':'BOUNDARY'):null})}
+      <div class="fv-name"><b>${esc(f)}</b> <span>${esc(b)}</span><em>${v.length}</em></div>
+      <div class="fv-bar"><i style="width:${pct(rr,rr+pp)};background:${C_RUN}"></i><i style="width:${pct(pp,rr+pp)};background:${C_PASS}"></i></div></div>`; }).join('');
+  const downRow=[1,2,3,4].map(d=>{ const x=shown.filter(p=>p.down===d); const xr=x.filter(p=>p.d.rp==='RUN').length, xp=x.filter(p=>p.d.rp==='PASS').length; return `<tr><td>${d}${['st','nd','rd','th'][d-1]}</td><td>${x.length}</td><td style="color:#ff8a9a">${pct(xr,xr+xp)}</td><td style="color:#7dd3fc">${pct(xp,xr+xp)}</td></tr>`; }).join('');
+  const bfs=groupBy(sub,p=>p.bf).map(([k,v])=>`<span class="chip">${esc(k)} <em>${v.length}</em></span>`).join(' ');
+  return `<h3>FIELD VIEW <span class="note">· top ${groups.length} formations in this scope · tap a card · the diagram, arrows and every table below it are that one look</span></h3>
+    <div class="fv-grid">${cards}</div>
+    <div class="fv-detail">
+      <div class="fv-head"><div><b>${esc(form)}</b> <span>${esc(bfLabel)}</span> <em>${sub.length} plays</em>${SYNC.mode==='view'?'':` <button class="sm" style="margin-left:10px" data-act="fedOpen" data-form="${esc(form)}" data-bf="${esc(bf)}" data-mode="form">EDIT FORM</button> <button class="sm" data-act="fedOpen" data-form="${esc(form)}" data-bf="${esc(bf)}" data-mode="bf">EDIT BACKFIELD</button>`}${resolveLayout(o,form,bf).custom?' <span class="note">· custom alignment</span>':''}</div>
+        <div class="row" style="gap:4px">${[['ALL','ALL · '+sub.length],['FIELD','STR → FIELD · '+sf.length],['BDRY','STR → BDRY · '+sb.length]].map(([v,l])=>`<button class="btn ${fvStr===v?'on':''}" style="font-size:12px;height:30px;padding:0 10px" data-act="fvStr" data-v="${v}">${l}</button>`).join('')}</div></div>
+      <div class="fv-body">
+        <div>${(()=>{ const sF=shown.filter(p=>strSide(p)==='FIELD').length, sB=shown.filter(p=>strSide(p)==='BOUNDARY').length; const strengthField = fvStr==='FIELD'?true:fvStr==='BDRY'?false:sB<=sF;
+            const nm=groupBy(shown,p=>p.bf)[0]; if(nm) bf=nm[0];   // the backfield as charted for these plays
+            const btF=shown.filter(p=>p.d.backTo==='FIELD').length, btB=shown.filter(p=>p.d.backTo==='BOUNDARY').length;
+            return fvSVG(o,form,bf,shown,{strength:strengthField?'FIELD':'BOUNDARY', backTo:(btF||btB)?(btF>=btB?'FIELD':'BOUNDARY'):null}); })()}</div>
+        <div class="fv-side">
+          <div class="kpis" style="grid-template-columns:repeat(3,1fr)"><div class="kpi run"><b>${pct(r,r+pa)}</b><s>RUN</s></div><div class="kpi pass"><b>${pct(pa,r+pa)}</b><s>PASS</s></div><div class="kpi"><b>${ypp}</b><s>YDS / PLAY</s></div></div>
+          <table class="tbl"><thead><tr><th>Down</th><th>Plays</th><th style="color:#ff8a9a">Run</th><th style="color:#7dd3fc">Pass</th></tr></thead><tbody>${downRow}</tbody></table>
+          <div class="fv-row"><span class="lbl">Run concepts</span>${topList(shown.filter(p=>p.d.rp==='RUN'&&p.concept),p=>p.concept,4)}</div>
+          <div class="fv-row"><span class="lbl">Pass concepts</span>${topList(shown.filter(p=>p.d.rp==='PASS'&&p.concept),p=>p.concept,4)}</div>
+          <div class="fv-row"><span class="lbl">Key runners</span>${topRunners(shown,3)}</div>
+          <div class="fv-row"><span class="lbl">Key receivers</span>${topReceivers(shown,3)}</div>
+          <div class="fv-row"><span class="lbl">Backfields in this look</span>${bfs}</div>
+          <div class="fv-row"><span class="lbl">Run strong / weak</span>${split2(shown.filter(p=>p.d.rp==='RUN'),p=>p.d.sw,'STRONG','WEAK',['#ffffff','#f4a7b9'])}</div>
+        </div>
+      </div>
+      <div class="fv-break">
+        <h4>${esc(form)} · ${esc(bfLabel)} — by down & distance</h4>${tendTable(groupBy(shown,p=>p.d.dd),{label:'D&D',extra:SW_EXTRA.concat([KEY_RUN,KEY_REC,TOPC,TOPPC])})}
+        <h4>${esc(form)} · ${esc(bfLabel)} — by field zone</h4>${tendTable(groupBy(shown,p=>p.d.zone).sort((a,b)=>ZONE_ORDER.indexOf(a[0])-ZONE_ORDER.indexOf(b[0])),{label:'Zone',extra:SW_EXTRA.concat([TOPC,TOPPC])})}
+        <h4>${esc(form)} · ${esc(bfLabel)} — near / far hash <span class="note">· near = opponent's bench side · set from the NEAR chip in the score bar</span></h4>${tendTable(groupBy(shown.filter(p=>p.d.nf),p=>p.d.nf+' HASH'),{label:'Hash side',extra:[['To bench / away',x=>split2(x.filter(p=>p.d.toward),p=>p.d.toward,'TO BENCH','AWAY FROM BENCH',['#6ee7ff','#ffffff'])],KEY_RUN,KEY_REC,TOPC,TOPPC]})}
+        <h4>${esc(form)} · ${esc(bfLabel)} — by hash</h4>${tendTable(groupBy(shown,p=>({L:'LEFT HASH',M:'MIDDLE',R:'RIGHT HASH'})[p.hash]||p.hash),{label:'Hash',extra:[['Str → F/B',x=>split2(x,p=>strSide(p),'FIELD','BOUNDARY',['#2ecc71','#ffd23c'])],TOPC,TOPPC]})}
+        <h4>${esc(form)} · ${esc(bfLabel)} — motion</h4>${tendTable(groupBy(shown,p=>p.motion||'NO MOTION'),{label:'Motion',extra:SW_EXTRA.concat([TOPC,TOPPC])})}
+        <h4>${esc(form)} · ${esc(bfLabel)} — results</h4>${tendTable(groupBy(shown,p=>p.result),{label:'Result',noDir:true,extra:[['Concepts',x=>topList(x,p=>p.concept)],['Players',x=>topList(x.flatMap(p=>p.players.slice(0,1)),k=>plName(k))]]})}
+      </div>
+    </div>`;
+}
+
+function nfApply(ps){ return nfFilter==='ALL' ? ps : ps.filter(p=>p.d&&p.d.nf===nfFilter); }
+function tabHTML(tab, all, base){
+  base = base || all;   // base = the scope before the near/far filter — situations are found on the full sequence, then the resulting plays are filtered
   const o=opp(), g=game(); const ps=filtered(all);
   if(!all.length) return '<div class="note">No plays in this scope yet.</div>';
   if(!ps.length) return `<div class="note">No ${rpFilter.toLowerCase()} plays in this scope.</div>`;
@@ -1525,7 +1829,7 @@ function tabHTML(tab, all){
       return `<div class="charts">
         ${downFilter?`${splitBar(downName()+' — RUN / PASS BY FIELD ZONE','How they attack this down from each part of the field', splitRows(ps,p=>p.d.zone).sort((a,b)=>ZONE_ORDER.indexOf(a.label)-ZONE_ORDER.indexOf(b.label)))}
         ${heatMap(heatTitle(downName()+' — FIELD ZONE × DISTANCE').toUpperCase(),'Short 1–3 · Med 4–7 · Long 8+ · Goal = goal-to-go', ZONE_ORDER.filter(z=>ps.some(p=>p.d.zone===z)), ['SHORT','MED','LONG','GOAL'], heatOf(ps,p=>p.d.zone,null,DIST_GROUP,null,'pass'))}
-        ${heatMap(downName()+' — FORMATION × FIELD ZONE — SHARE OF PLAYS','Where each formation shows up on this down', groupBy(ps,p=>p.d.formation).slice(0,8).map(x=>x[0]), ZONE_ORDER.filter(z=>ps.some(p=>p.d.zone===z)), heatOf(ps,p=>p.d.formation,null,p=>p.d.zone,null,'share'),{cw:84})}`
+        ${heatMap(downName()+' — FORMATION × FIELD ZONE — SHARE OF PLAYS','Where each formation shows up on this down', groupBy(ps,p=>p.d.formation).slice(0,8).map(x=>x[0]), ZONE_ORDER.filter(z=>ps.some(p=>p.d.zone===z)), heatOf(ps,p=>p.d.formation,null,p=>p.d.zone,null,'share'),{cw:84,relative:true})}`
         :`${splitBar('WHERE THEY ATTACK — RUN / PASS BY PERSONNEL','Share of plays by play type within each personnel grouping', splitRows(ps,p=>p.pers))}
         ${heatMap(heatTitle('SITUATIONAL PASSING — DOWN × DISTANCE').toUpperCase(),'Short 1–3 · Med 4–7 · Long 8+ · Goal = goal-to-go', ['1st','2nd','3rd','4th'], ['SHORT','MED','LONG','GOAL'], heatOf(ps,DOWN_LABEL,null,DIST_GROUP,null,'pass'))}`}
       </div><div class="kpis">
@@ -1549,17 +1853,17 @@ function tabHTML(tab, all){
       ${(o.alerts&&o.alerts.length)?`<h4>Scout alerts <span class="note">· from the Opponent Scout report</span></h4><table class="tbl"><thead><tr><th>Situation / tell</th><th>Detail</th></tr></thead><tbody>${o.alerts.map(a=>`<tr><td><b style="color:#ff8a9a">${esc(a.title||'')}</b></td><td style="white-space:normal">${esc(a.text||'')}</td></tr>`).join('')}</tbody></table>`:''}`}`;
     }
     case 'first': {
-      const src=all.filter(p=>p.d&&!p.pat);
+      const src=base.filter(p=>p.d&&!p.pat);
       return `<div class="charts">${(()=>{ // one summary chart: run/pass per situation
-        const rows=FIRST_SITS.map(([t,,fn])=>{ const v=filtered(fn(src)); const {r,pa}=rp(v); const c=(f,val)=>v.filter(p=>f(p)===val).length; return {label:t,n:v.length,run:r,pass:pa,s:c(p=>p.d.sw,'STRONG'),w:c(p=>p.d.sw,'WEAK'),f:c(p=>p.d.fb,'FIELD'),b:c(p=>p.d.fb,'BOUNDARY')}; }).filter(x=>x.n>0);
+        const rows=FIRST_SITS.map(([t,,fn])=>{ const v=filtered(nfApply(fn(src))); const {r,pa}=rp(v); const c=(f,val)=>v.filter(p=>f(p)===val).length; return {label:t,n:v.length,run:r,pass:pa,s:c(p=>p.d.sw,'STRONG'),w:c(p=>p.d.sw,'WEAK'),f:c(p=>p.d.fb,'FIELD'),b:c(p=>p.d.fb,'BOUNDARY')}; }).filter(x=>x.n>0);
         return `<div class="chart wide"><div class="ct">1ST PLAY — WHAT THEY CALL AFTER…</div><div class="cs">run / pass · strong / weak · field / boundary for the play that follows each situation</div>${miniSVG(rows,true)}</div>`; })()}</div>
-      ${FIRST_SITS.map(([t,sub,fn])=>sitPage(t,sub,fn(src),src.length)).join('')}`;
+      ${FIRST_SITS.map(([t,sub,fn])=>sitPage(t,sub,nfApply(fn(src)),src.length)).join('')}`;
     }
     case 'drive': {
-      const gp = repScope==='game'? gamePlays(g) : all.slice().sort((a,b)=>a.ts-b.ts);
+      const gp = repScope==='game'? gamePlays(g) : base.slice().sort((a,b)=>a.ts-b.ts);
       const series=groupBy(gp,p=>p.gameId+'|'+p.series).sort((a,b)=>b[1][b[1].length-1].ts-a[1][a[1].length-1].ts); // newest first
       if(!series.length) return '<div class="note">No drives yet.</div>';
-      const [,lastDrive]=series[0]; const ds=driveSummary(lastDrive); const lf=filtered(lastDrive);
+      const [,lastDrive]=series[0]; const ds=driveSummary(lastDrive); const lf=filtered(nfApply(lastDrive));
       return `<h4>Last drive — series ${lastDrive[0].series} · Q${lastDrive[0].qtr} · started ${ds.start} <span class="note">· ${ds.n} plays · ${ds.yds} yds · ${ds.firsts} first downs · ${ds.res}</span></h4>
       <table class="tbl"><thead><tr><th>#</th><th>D&D</th><th>Ball</th><th>Hash</th><th>Pers</th><th>Formation</th><th>Motion</th><th>Type</th><th>Dir</th><th>S/W</th><th>F/B</th><th>Concept</th><th>Players</th><th>Result</th><th class="r">Yds</th></tr></thead><tbody>
       ${lf.map(p=>`<tr><td><b>${p.n}</b></td><td>${ddLabel(p)}</td><td>${fmtSpot(p.side,p.yl)}</td><td>${p.hash||''}</td><td>${p.pers||''}</td><td>${esc(p.d.formation)}</td><td>${p.motion&&p.motion!=='NONE'?esc(p.motion):''}</td><td>${p.type}</td><td>${p.dir||''}</td><td>${p.d.sw||''}</td><td>${p.d.fb||''}</td><td>${esc(p.concept)}</td><td>${p.players.map(x=>'#'+x).join(' ')}</td><td>${fmtRes(p)}</td><td class="r">${p.yds}</td></tr>`).join('')}</tbody></table>
@@ -1569,37 +1873,40 @@ function tabHTML(tab, all){
       <table class="tbl"><thead><tr><th>Series</th><th>Q</th><th>Start</th><th class="r">Plays</th><th class="r">Yds</th><th class="r">1st dns</th><th>Run/Pass</th><th>Formations</th><th>Result</th></tr></thead><tbody>
       ${series.map(([k,v])=>{ const d=driveSummary(v); const gm=S.games.find(x=>x.id===v[0].gameId)||{}; return `<tr><td><b>${v[0].series}</b>${repScope!=='game'?` <span class="note">${esc(gm.label||'')}</span>`:''}</td><td>${v[0].qtr}</td><td>${d.start}</td><td class="r">${d.n}</td><td class="r">${d.yds}</td><td class="r">${d.firsts}</td><td>${d.r}/${d.pa}</td><td>${topFormList(v,2)}</td><td>${d.res}</td></tr>`; }).join('')}</tbody></table>`;
     }
+    case 'field':
     case 'formation':
-      return `<div class="charts">
+      return fieldViewHTML(ps,o)+`<h3>MATRIX & HEAT MAPS</h3><div class="charts">
         ${fmMatrix('FORMATION TENDENCY MATRIX — BACKFIELD TYPE + FORM FAMILY','Run/pass split, then where the RUN goes (strong/weak · field/boundary) and where the PASS goes · top 10 by usage', fmRows(ps))}
         ${heatMap(heatTitle('FORMATION × DOWN').toUpperCase(),'Top 8 formations', groupBy(ps,p=>p.d.formation).slice(0,8).map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(ps,p=>p.d.formation,null,DOWN_LABEL,null,'pass'),{cw:80})}
-        ${heatMap('FORMATION USAGE × DOWN — SHARE OF PLAYS','Where each formation shows up', groupBy(ps,p=>p.d.formation).slice(0,8).map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(ps,p=>p.d.formation,null,DOWN_LABEL,null,'share'),{cw:80})}
-      </div><h4>Backfield + Form Family</h4>${tendTable(groupBy(ps,p=>p.d.formation),{label:'Formation',extra:SW_EXTRA.concat([KEY_RUN,KEY_REC,TOPC,TOPPC])})}
-      <h4>BF type + form family</h4>${tendTable(groupBy(ps,fmKey),{label:'BF Type · Form',extra:[['Run S/W',x=>split2(x.filter(p=>p.d.rp==='RUN'),p=>p.d.sw,'STRONG','WEAK',['#ffffff','#f4a7b9'])],['Run F/B',x=>split2(x.filter(p=>p.d.rp==='RUN'),p=>p.d.fb,'FIELD','BOUNDARY',['#2ecc71','#ffd23c'])],['Pass S/W',x=>split2(x.filter(p=>p.d.rp==='PASS'),p=>p.d.sw,'STRONG','WEAK',['#ffffff','#f4a7b9'])],['Pass F/B',x=>split2(x.filter(p=>p.d.rp==='PASS'),p=>p.d.fb,'FIELD','BOUNDARY',['#2ecc71','#ffd23c'])],TOPC,TOPPC]})}
-      <h4>Backfield type</h4>${tendTable(groupBy(ps,p=>p.d.bfType),{label:'BF Type',extra:[['Backfields',x=>topList(x,p=>p.d.bfLabel+(p.d.bfDC?' ('+p.d.bfDC+')':''))],TOPF,TOPC,TOPPC]})}
-      <h4>Backfield type × down <span class="note">· plays · run% / pass% · avg</span></h4>${matrix(ps,p=>p.d.bfType,'BF Type',p=>p.down+'',['1','2','3','4'])}
-      <h4>Backfield</h4>${tendTable(groupBy(ps,p=>p.d.bfLabel),{label:'Backfield',extra:[['Back to F/B',x=>split2(x,p=>p.d.backTo,'FIELD','BOUNDARY')],['To back / Away',x=>split2(x,p=>p.d.toBack,'TO BACK','AWAY FROM BACK')],TOPC,TOPPC]})}
-      <h4>Form Family</h4>${tendTable(groupBy(ps,p=>p.form),{label:'Form',extra:SW_EXTRA.concat([TOPC,TOPPC])})}
-      <h4>Personnel</h4>${tendTable(groupBy(ps,p=>p.pers),{label:'Pers',extra:[TOPF,TOPC,TOPPC]})}
-      <h4>Motion</h4>${tendTable(groupBy(ps,p=>p.motion),{label:'Motion',extra:[TOPF,TOPC,TOPPC]})}
-      <h4>Formation × down <span class="note">· plays · run% / pass% · avg</span></h4>${matrix(ps,p=>p.d.formation,'Formation',p=>p.down+'',['1','2','3','4'])}
-      <h4>Formation × field zone</h4>${matrix(ps,p=>p.d.formation,'Formation',p=>p.d.zone,ZONE_ORDER)}`;
+        ${heatMap('FORMATION USAGE × DOWN — SHARE OF PLAYS','Where each formation shows up', groupBy(ps,p=>p.d.formation).slice(0,8).map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(ps,p=>p.d.formation,null,DOWN_LABEL,null,'share'),{cw:80,relative:true})}
+      </div><h3>Backfield + Form Family</h3>${tendTable(groupBy(ps,p=>p.d.formation),{label:'Formation',extra:SW_EXTRA.concat([KEY_RUN,KEY_REC,TOPC,TOPPC])})}
+      <h3>BF type + form family</h3>${tendTable(groupBy(ps,fmKey),{label:'BF Type · Form',extra:[['Run S/W',x=>split2(x.filter(p=>p.d.rp==='RUN'),p=>p.d.sw,'STRONG','WEAK',['#ffffff','#f4a7b9'])],['Run F/B',x=>split2(x.filter(p=>p.d.rp==='RUN'),p=>p.d.fb,'FIELD','BOUNDARY',['#2ecc71','#ffd23c'])],['Pass S/W',x=>split2(x.filter(p=>p.d.rp==='PASS'),p=>p.d.sw,'STRONG','WEAK',['#ffffff','#f4a7b9'])],['Pass F/B',x=>split2(x.filter(p=>p.d.rp==='PASS'),p=>p.d.fb,'FIELD','BOUNDARY',['#2ecc71','#ffd23c'])],TOPC,TOPPC]})}
+      <h3>Backfield type</h3>${tendTable(groupBy(ps,p=>p.d.bfType),{label:'BF Type',extra:[['Backfields',x=>topList(x,p=>p.d.bfLabel+(p.d.bfDC?' ('+p.d.bfDC+')':''))],TOPF,TOPC,TOPPC]})}
+      <h3>Backfield type × down <span class="note">· plays · run% / pass% · avg</span></h3>${matrix(ps,p=>p.d.bfType,'BF Type',p=>p.down+'',['1','2','3','4'])}
+      <h3>Backfield</h3>${tendTable(groupBy(ps,p=>p.d.bfLabel),{label:'Backfield',extra:[['Back to F/B',x=>split2(x,p=>p.d.backTo,'FIELD','BOUNDARY')],['To back / Away',x=>split2(x,p=>p.d.toBack,'TO BACK','AWAY FROM BACK')],TOPC,TOPPC]})}
+      <h3>Form Family</h3>${tendTable(groupBy(ps,p=>p.form),{label:'Form',extra:SW_EXTRA.concat([TOPC,TOPPC])})}
+      <h3>Personnel</h3>${tendTable(groupBy(ps,p=>p.pers),{label:'Pers',extra:[TOPF,TOPC,TOPPC]})}
+      <h3>Motion</h3>${tendTable(groupBy(ps,p=>p.motion),{label:'Motion',extra:[TOPF,TOPC,TOPPC]})}
+      <h3>Formation × down <span class="note">· plays · run% / pass% · avg</span></h3>${matrix(ps,p=>p.d.formation,'Formation',p=>p.down+'',['1','2','3','4'])}
+      <h3>Formation × field zone</h3>${matrix(ps,p=>p.d.formation,'Formation',p=>p.d.zone,ZONE_ORDER)}`;
     case 'dd':
       return `<div class="charts">
         ${heatMap(heatTitle('SITUATIONAL PASSING — DOWN × DISTANCE').toUpperCase(),'Short 1–3 · Med 4–7 · Long 8+ · Goal = goal-to-go', ['1st','2nd','3rd','4th'], ['SHORT','MED','LONG','GOAL'], heatOf(ps,DOWN_LABEL,null,DIST_GROUP,null,'pass'))}
-        ${heatMap('FORMATION USE BY D&D — SHARE OF PLAYS','Top 6 formations', groupBy(ps,p=>p.d.dd).map(x=>x[0]).sort(), groupBy(ps,p=>p.d.formation).slice(0,6).map(x=>x[0]), heatOf(ps,p=>p.d.dd,null,p=>p.d.formation,null,'share'),{cw:88})}
+        ${heatMap('FORMATION USE BY D&D — SHARE OF PLAYS','Top 6 formations', groupBy(ps,p=>p.d.dd).map(x=>x[0]).sort(), groupBy(ps,p=>p.d.formation).slice(0,6).map(x=>x[0]), heatOf(ps,p=>p.d.dd,null,p=>p.d.formation,null,'share'),{cw:88,relative:true})}
       </div><h4>Down &amp; distance</h4>${tendTable(groupBy(ps,p=>p.d.dd).sort((a,b)=>a[0].localeCompare(b[0])),{label:'D&D',extra:[TOPF,TOPC,TOPPC]})}
       <h4>By down</h4>${tendTable(groupBy(ps,p=>p.down+' DOWN').sort((a,b)=>a[0].localeCompare(b[0])),{label:'Down',extra:[TOPF,TOPC,TOPPC]})}
       <h4>D&D × formation <span class="note">· plays · run% / pass% · avg</span></h4>${matrix(ps,p=>p.d.dd,'D&D',p=>p.d.formation,groupBy(ps,p=>p.d.formation).slice(0,6).map(x=>x[0]))}
       <h3>FORMATION USE BY DOWN &amp; DISTANCE</h3>${nested(ps.slice().sort((a,b)=>a.d.dd.localeCompare(b.d.dd)),p=>p.d.dd,'D&D',p=>p.d.formation,'Formation')}`;
     case 'attack':
       return `<div class="charts">
-        ${heatMap(heatTitle('HASH × DIRECTION').toUpperCase(),'Where the ball goes from each hash', ['LEFT HASH','MIDDLE','RIGHT HASH'], ['LEFT','MIDDLE','RIGHT'], heatOf(ps,p=>({L:'LEFT HASH',M:'MIDDLE',R:'RIGHT HASH'})[p.hash],null,p=>p.dir,null,'pass'))}
-        ${heatMap('ATTACK VECTOR × DOWN — SHARE OF PLAYS','', groupBy(ps,attackKey).map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(ps,attackKey,null,DOWN_LABEL,null,'share'))}
+        ${heatMap('NEAR / FAR HASH × TO BENCH / AWAY — SHARE OF PLAYS','Near = the hash on the opponent\'s bench side · do they attack toward or away from their sideline', ['NEAR HASH','FAR HASH'], ['TO BENCH','AWAY FROM BENCH'], heatOf(ps.filter(p=>p.d.nf&&p.d.nf!=='MID'&&p.d.toward),p=>p.d.nf+' HASH',null,p=>p.d.toward,null,'share'),{cw:120,relative:true})}
+        ${heatMap(heatTitle('HASH × DIRECTION').toUpperCase(),'Where the ball goes from each hash', ['LEFT HASH','MIDDLE','RIGHT HASH'], ['LEFT','RIGHT'], heatOf(ps,p=>({L:'LEFT HASH',M:'MIDDLE',R:'RIGHT HASH'})[p.hash],null,p=>p.dir,null,'pass'))}
+        ${heatMap('ATTACK VECTOR × DOWN — SHARE OF PLAYS','', groupBy(ps,attackKey).map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(ps,attackKey,null,DOWN_LABEL,null,'share'),{relative:true})}
       </div><h4>Field / boundary</h4>${tendTable(groupBy(ps,p=>p.d.fb),{label:'Attack',extra:[TOPF,TOPC,TOPPC]})}
       <h4>Strong / weak</h4>${tendTable(groupBy(ps,p=>p.d.sw),{label:'Attack',extra:[TOPF,TOPC,TOPPC]})}
       <h4>Combined</h4>${tendTable(groupBy(ps,attackKey),{label:'Field/Bdry · Str/Wk',extra:[TOPF,TOPC,TOPPC]})}
       <h4>Direction</h4>${tendTable(groupBy(ps,p=>p.dir),{label:'Direction',extra:SW_EXTRA.concat([TOPF])})}
+      <h4>Near / far hash <span class="note">· relative to the opponent's bench</span></h4>${tendTable(groupBy(ps.filter(p=>p.d.nf),p=>p.d.nf+' HASH'),{label:'Hash side',extra:[['To bench / away',x=>split2(x.filter(p=>p.d.toward),p=>p.d.toward,'TO BENCH','AWAY FROM BENCH',['#6ee7ff','#ffffff'])]].concat(SW_EXTRA,[TOPF,TOPC,TOPPC])})}
       <h4>Hash</h4>${tendTable(groupBy(ps,p=>({L:'LEFT HASH',M:'MIDDLE',R:'RIGHT HASH'})[p.hash]),{label:'Hash',extra:SW_EXTRA.concat([TOPF])})}
       <h4>To the back / away from the back</h4>${tendTable(groupBy(ps,p=>p.d.toBack),{label:'vs back',extra:[TOPF,TOPC,TOPPC]})}
       <h4>Attack × down</h4>${matrix(ps,attackKey,'Attack',p=>p.down+'',['1','2','3','4'])}
@@ -1659,9 +1966,9 @@ function tabHTML(tab, all){
         <h4>QB by formation</h4>${qbTable(groupBy(drop,p=>p.d.formation).slice(0,8),'Formation')}`:'';
       if(!tagged.length) return qbHTML||'<div class="note">No key players tagged yet.</div>';
       return `<div class="charts">
-        ${heatMap('PLAYER × DOWN — SHARE OF TOUCHES','When each player is featured', byP.map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(tagged,p=>label(p._pl),null,DOWN_LABEL,null,'share'))}
-        ${heatMap('PLAYER × FIELD ZONE — SHARE OF TOUCHES','', byP.map(x=>x[0]), ZONE_ORDER.filter(z=>tagged.some(p=>p.d.zone===z)), heatOf(tagged,p=>label(p._pl),null,p=>p.d.zone,null,'share'),{cw:84})}
-        ${heatMap('PLAYER × FORMATION — SHARE OF TOUCHES','Top 6 formations', byP.map(x=>x[0]), groupBy(ps,p=>p.d.formation).slice(0,6).map(x=>x[0]), heatOf(tagged,p=>label(p._pl),null,p=>p.d.formation,null,'share'),{cw:88})}
+        ${heatMap('PLAYER × DOWN — SHARE OF TOUCHES','When each player is featured', byP.map(x=>x[0]), ['1st','2nd','3rd','4th'], heatOf(tagged,p=>label(p._pl),null,DOWN_LABEL,null,'share'),{relative:true})}
+        ${heatMap('PLAYER × FIELD ZONE — SHARE OF TOUCHES','', byP.map(x=>x[0]), ZONE_ORDER.filter(z=>tagged.some(p=>p.d.zone===z)), heatOf(tagged,p=>label(p._pl),null,p=>p.d.zone,null,'share'),{cw:84,relative:true})}
+        ${heatMap('PLAYER × FORMATION — SHARE OF TOUCHES','Top 6 formations', byP.map(x=>x[0]), groupBy(ps,p=>p.d.formation).slice(0,6).map(x=>x[0]), heatOf(tagged,p=>label(p._pl),null,p=>p.d.formation,null,'share'),{cw:88,relative:true})}
       </div><h4>Usage</h4>${tendTable(byP,{label:'Player',noDir:true,extra:[['Share',x=>pct(x.length,ps.length)+' of plays'],TOPF,TOPC,TOPPC,['TD',x=>x.filter(p=>/TD$/.test(p.result)).length]]})}
       <h4>Player × down <span class="note">· % of plays in that situation where he touched the ball · touches · avg</span></h4>${usageMatrix(tagged,ps,p=>label(p._pl),'Player',p=>p.down+'',['1','2','3','4'])}
       <h4>Player × field zone <span class="note">· % of plays in that zone he touched it</span></h4>${usageMatrix(tagged,ps,p=>label(p._pl),'Player',p=>p.d.zone,ZONE_ORDER)}
@@ -1694,13 +2001,14 @@ function downDrill(ps){
 }
 function reportTitle(){ const o=opp(), g=game(); const scopeLabel = repScope==='game'? `${g.label} · ${g.date}` : repScope==='opp'? `all ${S.games.filter(x=>x.oppId===o.id).length} games` : 'all opponents'; return `${o.name} — OFFENSIVE TENDENCIES${downFilter?' — '+downName():''}${rpFilter!=='ALL'?' — '+rpFilter+' ONLY':''} <span style="color:var(--muted);font-size:14px;font-weight:600">${esc(scopeLabel)}</span>`; }
 function renderReports(){
-  const all=scopePlays().filter(p=>p.d); const o=opp();
+  const base=scopePlays().filter(p=>p.d); const all=nfApply(base); const o=opp();
   document.getElementById('reports').innerHTML=`
   <div class="panel rep" style="flex:1;min-height:0">
     <div class="ph noprint" style="flex-wrap:wrap;gap:6px"><div class="row">${[['game','GAME'],['opp','ALL vs '+o.name],['all','EVERYTHING']].map(([v,l])=>`<button class="btn ${repScope===v?'on':''}" style="font-size:13px;height:32px;padding:0 10px" data-act="repScope" data-v="${v}">${esc(l)}</button>`).join('')}</div>
+      <div class="row" style="gap:4px">${[['ALL','ANY HASH'],['NEAR','NEAR HASH'],['FAR','FAR HASH'],['MID','MIDDLE']].map(([v,l])=>`<button class="btn ${nfFilter===v?'on':''}" style="font-size:12px;height:32px;padding:0 9px;${nfFilter===v?'border-color:var(--ice);color:var(--ice)':''}" data-act="nfFilter" data-v="${v}" title="Near = the hash on the opponent's bench side">${l}</button>`).join('')}</div>
       <div class="row">${[['ALL','ALL PLAYS'],['RUN','RUN ONLY'],['PASS','PASS ONLY']].map(([v,l])=>`<button class="btn ${rpFilter===v?'ok on':''}" style="font-size:13px;height:32px;padding:0 10px" data-act="rpFilter" data-v="${v}">${l}</button>`).join('')}<span style="width:6px"></span>${[['ALL','ALL DOWNS'],['1','1ST'],['2','2ND'],['3','3RD'],['4','4TH']].map(([v,l])=>`<button class="btn ${v==='ALL'?(!downFilter?'on':''):(downFilter&&downFilter.includes(+v)?'on':'')}" style="font-size:13px;height:32px;padding:0 10px;${v==='ALL'?'':'min-width:46px'}" data-act="downPick" data-v="${v}">${l}</button>`).join('')}<button class="btn ok on" style="font-size:13px;height:32px;padding:0 10px" data-act="pdf">PDF</button><button class="sm" data-act="print">Print</button></div></div>
     <div class="row noprint" style="gap:4px;border-bottom:1px solid var(--line);padding-bottom:6px">${REP_TABS.map(([k,l])=>`<button class="btn ${repTab===k?'on':''}" style="font-size:14px;height:34px" data-act="repTab" data-v="${k}">${l}</button>`).join('')}<span class="note" style="margin-left:auto;align-self:center;font-family:var(--mono);font-size:11px;letter-spacing:1px">${reportTitle()}</span></div>
-    <div class="scroll rep-body">${sectionize(tabHTML(repTab,all))}</div>
+    <div class="scroll rep-body">${sectionize(tabHTML(repTab,all,base))}</div>
   </div>`;
 }
 let repSub={};
@@ -1736,7 +2044,7 @@ function sectionize(html){
   out.appendChild(body);
   return out.innerHTML;
 }
-function fullReportHTML(){ const all=scopePlays().filter(p=>p.d); return `<h3>${reportTitle()}</h3>`+REP_TABS.map(([k,l])=>`<h3>${l}</h3>${tabHTML(k,all)}`).join(''); }
+function fullReportHTML(){ const base=scopePlays().filter(p=>p.d), all=nfApply(base); return `<h3>${reportTitle()}</h3>`+REP_TABS.map(([k,l])=>`<h3>${l}</h3>${tabHTML(k,all,base)}`).join(''); }
 
 /* ============================================================ OPPONENTS / LIBRARY */
 function renderOpponents(){
@@ -1763,6 +2071,7 @@ function renderOpponents(){
     <div class="ph"><b>${esc(o.name)} DASHBOARD BOARD</b><small>tap to show / hide on the Chart screen · library on the right is shared by every opponent</small></div>
     ${CATS.map(([cat,label])=>`<div class="grp"><div class="ph"><span class="lbl">${label}</span><button class="sm" data-act="oppAll" data-cat="${cat}">${o[cat].length===S.lib[cat].length?'None':'All'}</button>${cat==='personnel'?`<button class="sm ${o.fixedPers?'on':''}" style="margin-left:6px;${o.fixedPers?'border-color:var(--amber);color:var(--amber)':''}" data-act="fixedPers">${o.fixedPers?'ONE GROUPING · '+esc(o.fixedPers)+' · tap to turn off':'ONE GROUPING EVERY SNAP…'}</button>`:''}</div><div class="row">${S.lib[cat].map(v=>`<button class="check ${o[cat].includes(v)?'on':''}" data-act="oppToggle" data-cat="${cat}" data-v="${esc(v)}">${esc(v)}</button>`).join('')}</div></div>`).join('')}
   </div>`:''}
+  ${o?oppFormationsPanel(o):''}
   <div class="panel">
     <div class="ph"><b>MASTER LIBRARY</b><small>renaming updates every logged play · order here = button order on the dashboard</small></div>
     <div class="form-row">${CATS.map(([cat,label])=>`<div class="grp"><span class="lbl">${label}</span>
@@ -1816,12 +2125,14 @@ function renderExport(){
     </div>
     <div class="note" id="syncNote">${SYNC.mode==='chart'?'Every saved play is pushed to the cloud within a second. Works offline — it catches up when the connection returns.':SYNC.mode==='view'?'This device mirrors the charting iPad. Reports and the Play Log refresh as plays come in. Charting is locked here.':'Setup: Firebase console → create project → Realtime Database → start in test mode → copy the database URL above. Pick a room code, set the charting iPad to CHARTING and every other device to VIEWER.'}</div>
   </div>
+  <div class="panel"><div class="ph"><b>APP VERSION</b><small>this device is on BUILD ${BUILD}</small></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><button class="btn ok" data-act="reloadApp">RELOAD LATEST BUILD</button><span class="note">Clears the app's cached code and reloads it. Your opponents, games, plays, safety copies and formation edits are kept.</span></div></div>
   <div class="panel"><div class="ph"><b>REPORTS AS PDF</b></div><div class="note">Open Reports, pick the scope, tap SAVE PDF — the app builds the PDF itself (landscape, every table). Same button on the Play Log. Print uses the browser's own print dialog where it's allowed.</div></div>`;
 }
-const CSV_COLS=['play','snip','game','date','opponent','qtr','series','down','distance','dd_label','dd_bucket','hash','side','yard_line','true_yl','to_goal','zone','personnel','backfield','backfield_sw','backfield_type','backfield_dc_term','strength','form','formation','motion','play_type','run_pass','direction','strong_weak','field_boundary','back_to','to_back','concept','players','result','scramble_type','scramble_dir','scramble_fb','scramble_sw','scramble_vs_play','fumble_recovered','yards','success','pat','pat_good','ts'];
+const CSV_COLS=['play','snip','game','date','opponent','qtr','series','down','distance','dd_label','dd_bucket','hash','near_far','toward_bench','side','yard_line','true_yl','to_goal','zone','personnel','backfield','backfield_sw','backfield_type','backfield_dc_term','strength','form','formation','motion','play_type','run_pass','direction','strong_weak','field_boundary','back_to','to_back','concept','players','result','scramble_type','scramble_dir','scramble_fb','scramble_sw','scramble_vs_play','fumble_recovered','yards','success','pat','pat_good','ts'];
 function csvRows(ps){
   return ps.map(p=>{ const d=p.d||derive(p); const g=S.games.find(x=>x.id===p.gameId)||{}; const o=S.opponents.find(x=>x.id===p.oppId)||{};
-    return [p.n,p.snip||'',g.label,g.date,o.name,p.qtr,p.series,p.down,p.dist,ddLabel(p),d.dd,({L:'LEFT',M:'MIDDLE',R:'RIGHT'})[p.hash]||'',p.side,p.yl,trueYL(p.side,p.yl),d.tg,d.zone,p.pers,p.bf,d.bfLabel,d.bfType||'',d.bfDC||'',p.str,p.form,d.formation,p.motion,p.type,d.rp,p.dir,d.sw||'',d.fb||'',d.backTo||'',d.toBack||'',p.concept,p.players.join(' '),p.result,d.scr?d.scr.type:'',d.scr?d.scr.dir:'',d.scr?d.scr.fb:'',d.scr?d.scr.sw:'',d.scr?d.scr.toPlay:'',FUMBLE_RESULTS.has(p.result)?(p.fumRec?'Y':'N'):'',p.yds,succ(p)?1:0,p.pat||'',p.pat?(p.patGood?'Y':'N'):'',new Date(p.ts).toISOString()]; });
+    return [p.n,p.snip||'',g.label,g.date,o.name,p.qtr,p.series,p.down,p.dist,ddLabel(p),d.dd,({L:'LEFT',M:'MIDDLE',R:'RIGHT'})[p.hash]||'',d.nf||'',d.toward||'',p.side,p.yl,trueYL(p.side,p.yl),d.tg,d.zone,p.pers,p.bf,d.bfLabel,d.bfType||'',d.bfDC||'',p.str,p.form,d.formation,p.motion,p.type,d.rp,p.dir,d.sw||'',d.fb||'',d.backTo||'',d.toBack||'',p.concept,p.players.join(' '),p.result,d.scr?d.scr.type:'',d.scr?d.scr.dir:'',d.scr?d.scr.fb:'',d.scr?d.scr.sw:'',d.scr?d.scr.toPlay:'',FUMBLE_RESULTS.has(p.result)?(p.fumRec?'Y':'N'):'',p.yds,succ(p)?1:0,p.pat||'',p.pat?(p.patGood?'Y':'N'):'',new Date(p.ts).toISOString()]; });
 }
 function toCSV(ps){ const q=v=>{ v=v==null?'':String(v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }; return [CSV_COLS.join(',')].concat(csvRows(ps).map(r=>r.map(q).join(','))).join('\r\n'); }
 let DL=null; (async()=>{ try{ if(window.claude&&claude.use) DL=await claude.use('downloads'); }catch(e){} })();
@@ -1867,7 +2178,7 @@ function colIndex(headers){ const H=headers.map(normHeader); const idx={};
 function U(v){ return String(v==null?'':v).trim().toUpperCase(); }
 function mapHash(v){ v=U(v); if(!v) return null; if(v[0]==='L') return 'L'; if(v[0]==='R') return 'R'; if(v[0]==='M'||v[0]==='C') return 'M'; return null; }
 function mapStr(v){ v=U(v); if(!v) return null; if(/^(R|RT|RIGHT|RGT)$/.test(v)) return 'RIGHT'; if(/^(L|LT|LF|LEFT)$/.test(v)) return 'LEFT'; if(/BAL|B$/.test(v)) return 'BALANCED'; return null; }
-function mapDir(v){ v=U(v); if(!v) return null; if(/^(L|LT|LEFT)/.test(v)) return 'LEFT'; if(/^(R|RT|RIGHT)/.test(v)) return 'RIGHT'; if(/^(M|MID|MIDDLE|C|CENTER|INSIDE)/.test(v)) return 'MIDDLE'; return null; }
+function mapDir(v){ v=U(v); if(!v) return null; if(/^(L|LT|LEFT)/.test(v)) return 'LEFT'; if(/^(R|RT|RIGHT)/.test(v)) return 'RIGHT'; if(/^(M|MID|MIDDLE|C|CENTER|INSIDE)/.test(v)) return null; return null; }
 function mapType(v){ v=U(v); if(!v) return null; if(/RPO/.test(v)) return 'RPO'; if(/SCREEN|SCRN/.test(v)) return 'SCREEN'; if(/^P|PASS/.test(v)) return 'PASS'; if(/^R|RUN|RUSH/.test(v)) return 'RUN'; return null; }
 function mapResult(type, v, yds, td){ v=U(v); const T=td||/TD|TOUCHDOWN/.test(v);
   let r=null;
@@ -1907,6 +2218,7 @@ function importProfile(j){
   const o=ensureOpp(j.opponent||(opp()&&opp().name)||'OPPONENT');
   if(j.us) o.us=U(j.us);
   CATS.forEach(([cat])=>{ (j[cat]||[]).forEach(v=>{ const vv=addToLib(cat,v); if(vv&&!o[cat].includes(vv)) o[cat].push(vv); }); });
+  if(j.layouts&&typeof j.layouts==='object'){ o.layouts=Object.assign(o.layouts||{}, j.layouts); }
   { const pl=(j.personnel||[]).map(x=>String(x).trim()).filter(Boolean); if(pl.length<=1){ o.fixedPers=addToLib('personnel',pl[0]||'11')||'11'; if(!o.personnel.includes(o.fixedPers)) o.personnel.push(o.fixedPers); } else delete o.fixedPers; }
   (j.roster||[]).forEach(r=>{ const num=String(r.num||r.jersey||r['#']||'').trim(); if(!num) return; const ex=o.roster.find(x=>x.num===num); const rec={num,pos:U(r.pos||r.position||''),name:r.name||''}; if(ex) Object.assign(ex,rec); else o.roster.push(rec); });
   const cj=j.concepts||{}; const runC=j.run_concepts||cj.run||cj.RUN||[], passC=j.pass_concepts||cj.pass||cj.PASS||[]; const flat=Array.isArray(j.concepts)?j.concepts:[];
@@ -1991,6 +2303,12 @@ function askText(title, def='', placeholder=''){
     inp.onkeydown=e=>{ if(e.key==='Enter') done(inp.value); if(e.key==='Escape') done(null); };
     setTimeout(()=>{ inp.focus(); inp.select(); },30);
   });
+}
+function askBench(g){
+  const m=document.getElementById('modal'); m.className='modal';
+  m.innerHTML=`<div class="box"><h3>OPPONENT'S BENCH — 1ST QUARTER</h3><div style="font-size:15px">Looking at the field the way you chart it, which hash is on <b>${esc(opp().name)}'s bench side</b> right now? That becomes the NEAR hash. It flips by itself in the 2nd and 4th quarters.</div>
+    <div class="row" style="margin-top:10px;gap:8px"><button class="btn big" style="flex:1" data-act="setBench" data-v="L">LEFT HASH IS NEAR</button><button class="btn big" style="flex:1" data-act="setBench" data-v="R">RIGHT HASH IS NEAR</button></div>
+    <div class="row" style="justify-content:flex-end;margin-top:8px"><button class="sm" data-act="closeModal">Not now</button></div></div>`;
 }
 function askConfirm(msg, okLabel='YES'){
   return new Promise(res=>{
@@ -2080,7 +2398,7 @@ class PDFDoc{
     else if(model.type==='heat'){ const cw=Math.min(68,(avail-150)/model.cols.length), ch=24, padL=Math.min(160, 8+Math.max(...model.rows.map(r=>r.length))*4.8); const h=28+model.rows.length*ch; this.need(h+22); this.y-=16; this.text(PDF_M,this.y,title,10.5,true); if(subtitle){ this.y-=10; this.text(PDF_M,this.y,subtitle,7,false,[0.42,0.42,0.42]); }
       this.y-=12; model.cols.forEach((c,j)=>{ const t=pdfFit(pdfClean(c),7,cw-4); this.text(PDF_M+padL+j*cw+cw/2-pdfTextW(t,7)/2,this.y,t,7,true); }); this.y-=4;
       model.rows.forEach((r,i)=>{ this.y-=ch; const y=this.y; const t=pdfFit(pdfClean(r),7.5,padL-8); this.text(PDF_M+padL-5-pdfTextW(t,7.5),y+ch/2-3,t,7.5,true);
-        model.cols.forEach((c,j)=>{ const cell=model.cells[i][j]; const x=PDF_M+padL+j*cw; if(!cell){ this.rect(x+0.75,y+0.75,cw-1.5,ch-1.5,0.95); return; } const rgb=redsRGB(cell.v); this.rect(x+0.75,y+0.75,cw-1.5,ch-1.5,null,rgb); const dark=cell.v<0.55; const lab=Math.round(cell.v*100)+'%'; this.text(x+cw/2-pdfTextW(lab,9)/2,y+ch/2-1,lab,9,true,dark?[1,1,1]:[0.1,0.1,0.1]); const nn='n='+cell.n; this.text(x+cw/2-pdfTextW(nn,5.5)/2,y+4,nn,5.5,false,dark?[0.9,0.9,0.9]:[0.42,0.42,0.42]); }); });
+        model.cols.forEach((c,j)=>{ const cell=model.cells[i][j]; const x=PDF_M+padL+j*cw; if(!cell){ this.rect(x+0.75,y+0.75,cw-1.5,ch-1.5,0.95); return; } const rgb=heatRGB(cell.v*(model.relative?(1/Math.max(...model.cells.flat().filter(c=>c&&c.n).map(c=>c.v))||1):1)).map(x=>x/255); this.rect(x+0.75,y+0.75,cw-1.5,ch-1.5,null,rgb); const dark=cell.v<0.55; const lab=Math.round(cell.v*100)+'%'; this.text(x+cw/2-pdfTextW(lab,9)/2,y+ch/2-1,lab,9,true,dark?[1,1,1]:[0.1,0.1,0.1]); const nn='n='+cell.n; this.text(x+cw/2-pdfTextW(nn,5.5)/2,y+4,nn,5.5,false,dark?[0.9,0.9,0.9]:[0.42,0.42,0.42]); }); });
       this.y-=8; }
   }
   bytes(){
@@ -2128,6 +2446,7 @@ function loadSample(){
     roster:[{num:'13',pos:'QB',name:''},{num:'6',pos:'RB',name:''},{num:'22',pos:'RB',name:''},{num:'1',pos:'WR',name:''},{num:'7',pos:'WR',name:''},{num:'84',pos:'TE',name:''}]};
   ['backfield','form','motion','personnel'].forEach(c=>o[c].forEach(v=>{ if(!S.lib[c].includes(v)) S.lib[c].push(v); }));
   S.opponents.push(o); const g=newGame(o.id,'Sample Game'); g.label='Sample Game'; S.games.push(g); g.score={opp:24,us:27}; g.to={opp:[1,2],us:[2,3]};
+  g.bench1='R';   // sample: their bench is on the RIGHT-hash side in Q1 (so near = R in Q1/Q3, L in Q2/Q4)
   let e=Object.assign(blankEntry(),{down:1,dist:10,side:'OWN',yl:25}); let n=0, series=1;
   const RUNC=['IZ','OZ','Counter','Power','Duo','Jet Swp','QB Draw'], PASSC=['Mesh','Y-Cross','Smash','Verts','Bubble','Stick','Flood','Slant-Flat','Screen'];
   while(n<65){
@@ -2146,8 +2465,9 @@ function loadSample(){
     e.type = isRun? (rnd()<0.2?'RPO':'RUN') : (rnd()<0.12?'SCREEN':rnd()<0.15?'RPO':'PASS');
     // direction: run to strength 65%, to the back 60%; pass more balanced
     const strongDir = e.str==='RIGHT'?'RIGHT':e.str==='LEFT'?'LEFT':null;
-    if(isRun){ e.dir = rnd()<0.3?'MIDDLE': (strongDir&&rnd()<0.65? strongDir : pick(['LEFT','RIGHT'],[1,1])); }
-    else { e.dir = pick(['LEFT','MIDDLE','RIGHT'],[3,3,4]); }
+    const qtrNow=Math.min(4,1+Math.floor(n/17)); const nh=nearHash(g,qtrNow); const away = nh==='L'?'RIGHT':'LEFT', toward = nh==='L'?'LEFT':'RIGHT';
+    if(isRun){ e.dir = e.hash===nh ? (rnd()<0.7? away : toward) : (strongDir&&rnd()<0.65? strongDir : pick(['LEFT','RIGHT'],[1,1])); }   // NEAR hash: 70% run AWAY from their bench
+    else { e.dir = e.hash!==nh && e.hash!=='M' ? (rnd()<0.75? toward : away) : pick(['LEFT','RIGHT'],[1,1]); }                          // FAR hash: 75% throw back TOWARD the bench
     if(e.hash==='L'&&!isRun&&rnd()<0.6) e.dir='RIGHT'; if(e.hash==='R'&&!isRun&&rnd()<0.6) e.dir='LEFT'; // pass to the field
     // players & concept
     if(isRun){ e.players=[pick(['6','22','13'],[6,3,1])]; e.concept=pick(RUNC,[5,3,2,2,2,e.motion==='JET'?6:0.5,1]); }
@@ -2157,7 +2477,7 @@ function loadSample(){
     if(isRun){ yds=Math.round(Math.max(-3, (rnd()+rnd()+rnd())*6-3 + (rnd()<0.08?15:0))); result = tg-yds<=0?'RUSH TD': rnd()<0.03?'FUMBLE':'RUSH'; if(result==='RUSH TD') yds=tg; }
     else { const r=rnd(); if(r<0.36){ result='INCOMPLETE'; yds=0; } else if(r<0.42){ result='SACK'; yds=-Math.round(4+rnd()*6); } else if(r<0.45){ result='INTERCEPTION'; yds=0; } else if(r<0.5){ result='SCRAMBLE'; yds=Math.round(rnd()*9); } else { result='COMPLETE'; yds=Math.round(3+rnd()*rnd()*28); if(tg-yds<=0){ result='COMPLETE TD'; yds=tg; } } }
     e.yds=yds; e.result=result; e.fumRec=false;
-    const rec=Object.assign({},e,{players:[...e.players]}); rec.d=derive(rec); rec.id=uid(); rec.gameId=g.id; rec.oppId=o.id; rec.n=++n; rec.snip=n; rec.series=series; rec.qtr=Math.min(4,1+Math.floor((n-1)/17)); rec.ts=Date.now()-(65-n)*60000; S.plays.push(rec);
+    const rec=Object.assign({},e,{players:[...e.players]}); rec.d=derive(rec); rec.id=uid(); rec.gameId=g.id; rec.oppId=o.id; rec.n=++n; rec.snip=n; rec.series=series; rec.qtr=Math.min(4,1+Math.floor((n-1)/17)); rec.d=derive(rec); rec.ts=Date.now()-(65-n)*60000; S.plays.push(rec);
     const nx=computeNext(e);
     if(nx.newDrive){ series++; e=Object.assign(blankEntry(),{down:1,dist:10,side:'OWN',yl:Math.round(18+rnd()*22)}); }
     else e=Object.assign(blankEntry(),{down:nx.down,dist:nx.dist,side:nx.side,yl:nx.yl});
